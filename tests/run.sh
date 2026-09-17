@@ -156,8 +156,9 @@ in_repo() {
 }
 
 # `commit --amend --no-edit` stages nothing. A staged lane has nothing to
-# hand a formatter; a tree lane's invariant holds whatever changed, and
-# going quiet there is how a require = true group stops guarding unnoticed.
+# hand a formatter; every tree lane runs, `match` or not - a match filters
+# what changed and nothing did, while the invariant holds regardless. Going
+# quiet there is how a require = true group stops guarding unnoticed.
 case_empty_staged() {
 	local out
 	mkrepo <<-'CONF' || return
@@ -167,6 +168,11 @@ case_empty_staged() {
 		scope = tree
 		run   = printf ran-tree\n
 
+		[group narrow]
+		match = *.rs
+		scope = tree
+		run   = printf ran-narrow\n
+
 		[group paths]
 		scope = staged
 		run   = printf ran-staged:%s\n
@@ -174,6 +180,8 @@ case_empty_staged() {
 	out=$(in_repo pre-commit)
 	want_exit 'pre-commit/empty set exits 0' 0 $?
 	want_in 'pre-commit/a tree lane runs on an empty set' 'ran-tree' "$out"
+	want_in 'pre-commit/a matched tree lane runs on an empty set' \
+		'ran-narrow' "$out"
 	want_not_in 'pre-commit/a staged lane is never run pathless' \
 		'ran-staged' "$out"
 }
@@ -188,6 +196,12 @@ case_check_clean_tree() {
 		scope   = tree
 		require = true
 		run     = printf tree-ran\n
+
+		[group narrow]
+		match   = *.sh
+		scope   = tree
+		require = true
+		run     = printf narrow-ran\n
 	CONF
 	printf 'x\n' >"$repo/a.sh"
 	git -C "$repo" add -A
@@ -196,6 +210,33 @@ case_check_clean_tree() {
 	out=$(in_repo check)
 	want_exit 'check/a clean tree exits 0' 0 $?
 	want_in 'check/a tree lane runs on a clean tree' 'tree-ran' "$out"
+	want_in 'check/a matched tree lane runs on a clean tree' \
+		'narrow-ran' "$out"
+}
+
+# The other half of the rule: `match` still filters once something did
+# change. A tree lane narrow enough to be cheap stays out of an unrelated
+# commit - that is the only reason to give one a `match`.
+case_tree_match_filters() {
+	local out
+	mkrepo <<-'CONF' || return
+		schema = 1
+
+		[group narrow]
+		match = *.rs
+		scope = tree
+		run   = printf narrow-ran\n
+	CONF
+	printf 'x\n' >"$repo/a.rs"
+	git -C "$repo" add -A
+	git -C "$repo" commit -qm 'init'
+	printf 'doc\n' >"$repo/README.md"
+	git -C "$repo" add -A
+
+	out=$(in_repo pre-commit)
+	want_exit 'pre-commit/an unmatched change exits 0' 0 $?
+	want_not_in 'pre-commit/a matched tree lane skips an unmatched change' \
+		'narrow-ran' "$out"
 }
 
 case_match_and_paths() {
@@ -608,6 +649,7 @@ run_commit_msg
 run_commit_msg_output
 case_empty_staged
 case_check_clean_tree
+case_tree_match_filters
 case_match_and_paths
 case_aggregate
 case_missing_tool

@@ -607,13 +607,14 @@ run_group() {
 		for path in "${files[@]}"; do
 			path_matches "$path" "${patterns[@]}" && matched+=("$path")
 		done
-		# `match` is what selects the group: nothing matched, nothing to do.
-		((${#matched[@]} == 0)) && return 0
+		# `match` filters what changed; it cannot select against an empty
+		# set. Nothing changed falls through to the scope rule below.
+		((${#matched[@]} == 0)) && ((${#files[@]} > 0)) && return 0
 	fi
 
 	# A staged lane takes its paths as arguments, so handing it none makes it
-	# read stdin. Only a tree lane has work when nothing changed - and that
-	# is the lane whose invariant must not go quiet on `--amend`.
+	# read stdin. A tree lane runs anyway, `match` or not: its invariant does
+	# not depend on what changed, and it must not go quiet on `--amend`.
 	((${#matched[@]} == 0)) && [[ $scope != tree ]] && return 0
 
 	commands=${g_run[$group]}
