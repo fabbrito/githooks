@@ -10,6 +10,12 @@
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 
+# A git hook exports GIT_DIR, GIT_INDEX_FILE and friends. If this harness ever
+# runs from inside one, they would point every `git -C <tmpdir>` back at the
+# real repository. Drop them before touching git at all.
+unset GIT_DIR GIT_INDEX_FILE GIT_WORK_TREE GIT_PREFIX GIT_NAMESPACE
+unset GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_COMMON_DIR
+
 engine=$PWD/bin/githooks
 tmproot=$(mktemp -d) || exit 1
 trap 'rm -rf "$tmproot"' EXIT
@@ -73,14 +79,35 @@ want_not_in() {
 
 # ------------------------------------------------------------- commit-msg
 
+# Grading is pure text in, exit code out - but the engine locates hooks.conf
+# with `rev-parse --show-toplevel` and skips a message mid-rebase, so it must
+# run inside a repo. Its own, never this one: a rebase in progress here would
+# otherwise pass every fixture.
+fixture_repo=''
+
+make_fixture_repo() {
+	fixture_repo=$(mktemp -d -p "$tmproot") || return 1
+	git -C "$fixture_repo" init -q
+	mkdir -p "$fixture_repo/tests"
+	cp -r tests/commit-msg "$fixture_repo/tests/commit-msg"
+}
+
+# grade <name> [VAR=value ...]
+grade() {
+	local name=$1
+	shift
+	(cd "$fixture_repo" &&
+		GITHOOKS_CONF=$fixture_repo/tests/commit-msg/hooks.conf \
+			env "$@" "$engine" commit-msg "tests/commit-msg/$name.msg" 2>&1)
+}
+
 run_commit_msg() {
 	local msg want got name
 	for msg in tests/commit-msg/*.msg; do
 		name=${msg##*/}
 		name=${name%.msg}
 		want=$(<"tests/commit-msg/$name.expect")
-		GITHOOKS_CONF=$PWD/tests/commit-msg/hooks.conf \
-			"$engine" commit-msg "$msg" >/dev/null 2>&1
+		grade "$name" >/dev/null 2>&1
 		got=$?
 		want_exit "commit-msg/$name" "$want" "$got"
 	done
@@ -89,18 +116,22 @@ run_commit_msg() {
 # Rejections must say what to write, not just what is wrong.
 run_commit_msg_output() {
 	local out
-	out=$(GITHOOKS_CONF=$PWD/tests/commit-msg/hooks.conf \
-		"$engine" commit-msg tests/commit-msg/bad-scope.msg 2>&1)
+	out=$(grade bad-scope)
 	want_in 'commit-msg/bad-scope names the scopes' 'alpha' "$out"
 
-	out=$(GITHOOKS_CONF=$PWD/tests/commit-msg/hooks.conf \
-		"$engine" commit-msg tests/commit-msg/bad-period.msg 2>&1)
+	out=$(grade bad-period)
 	want_not_in 'commit-msg/bad-period stays quiet about scopes' \
 		'scopes:' "$out"
 
-	out=$(GITHOOKS_CONF=$PWD/tests/commit-msg/hooks.conf \
-		GITHOOKS_SKIP=1 "$engine" commit-msg tests/commit-msg/bad-shape.msg 2>&1)
+	grade bad-shape GITHOOKS_SKIP=1 >/dev/null 2>&1
 	want_exit 'commit-msg GITHOOKS_SKIP passes anything' 0 $?
+
+	# A rebase replays messages it did not author.
+	git -C "$fixture_repo" rev-parse --git-path rebase-merge >/dev/null
+	mkdir -p "$fixture_repo/.git/rebase-merge"
+	grade bad-shape >/dev/null 2>&1
+	want_exit 'commit-msg/mid-rebase grades nothing' 0 $?
+	rmdir "$fixture_repo/.git/rebase-merge"
 }
 
 # ------------------------------------------------------------- dispatcher
@@ -418,6 +449,7 @@ CONF
 
 # -------------------------------------------------------------------- main
 
+make_fixture_repo || exit 1
 run_commit_msg
 run_commit_msg_output
 case_empty_staged
