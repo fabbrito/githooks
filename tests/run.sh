@@ -152,17 +152,47 @@ in_repo() {
 	(cd "$repo" && GITHOOKS_CONF=$repo/hooks.conf "$engine" "$@" 2>&1)
 }
 
+# `commit --amend --no-edit` stages nothing. A staged lane has nothing to
+# hand a formatter; a tree lane's invariant holds whatever changed, and
+# going quiet there is how a require = true group stops guarding unnoticed.
 case_empty_staged() {
 	local out
 	mkrepo <<'CONF' || return
 schema = 1
 
-[group always]
-run = printf ran:%s\n always
+[group whole]
+scope = tree
+run   = printf ran-tree\n
+
+[group paths]
+scope = staged
+run   = printf ran-staged:%s\n
 CONF
 	out=$(in_repo pre-commit)
 	want_exit 'pre-commit/empty set exits 0' 0 $?
-	want_not_in 'pre-commit/empty set runs nothing' 'ran:' "$out"
+	want_in 'pre-commit/a tree lane runs on an empty set' 'ran-tree' "$out"
+	want_not_in 'pre-commit/a staged lane is never run pathless' \
+		'ran-staged' "$out"
+}
+
+# The consumer case: an invariant lane on a tree with nothing to commit.
+case_check_clean_tree() {
+	local out
+	mkrepo <<'CONF' || return
+schema = 1
+
+[group whole]
+scope   = tree
+require = true
+run     = printf tree-ran\n
+CONF
+	printf 'x\n' >"$repo/a.sh"
+	git -C "$repo" add -A
+	git -C "$repo" commit -qm 'init'
+
+	out=$(in_repo check)
+	want_exit 'check/a clean tree exits 0' 0 $?
+	want_in 'check/a tree lane runs on a clean tree' 'tree-ran' "$out"
 }
 
 case_match_and_paths() {
@@ -543,6 +573,7 @@ make_fixture_repo || exit 1
 run_commit_msg
 run_commit_msg_output
 case_empty_staged
+case_check_clean_tree
 case_match_and_paths
 case_aggregate
 case_missing_tool

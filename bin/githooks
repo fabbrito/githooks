@@ -607,8 +607,14 @@ run_group() {
 		for path in "${files[@]}"; do
 			path_matches "$path" "${patterns[@]}" && matched+=("$path")
 		done
+		# `match` is what selects the group: nothing matched, nothing to do.
 		((${#matched[@]} == 0)) && return 0
 	fi
+
+	# A staged lane takes its paths as arguments, so handing it none makes it
+	# read stdin. Only a tree lane has work when nothing changed - and that
+	# is the lane whose invariant must not go quiet on `--amend`.
+	((${#matched[@]} == 0)) && [[ $scope != tree ]] && return 0
 
 	commands=${g_run[$group]}
 	if $fix && [[ -n ${g_fix[$group]} ]]; then
@@ -628,7 +634,9 @@ run_group() {
 		fi
 	done <<<"$commands"
 
-	if $fix && $restage && [[ -n ${g_fix[$group]} ]]; then
+	# No paths means a pathless tree lane: `git add --` would only print
+	# git's own "nothing specified" hint at someone who asked for nothing.
+	if $fix && $restage && ((${#matched[@]} > 0)) && [[ -n ${g_fix[$group]} ]]; then
 		git add -- "${matched[@]}" || failed=1
 	fi
 
@@ -665,8 +673,6 @@ refuse_partial() {
 
 dispatch() {
 	local fix=$1 group
-
-	((${#files[@]} == 0)) && return 0
 
 	for group in "${group_names[@]}"; do
 		run_group "$group" "$fix"

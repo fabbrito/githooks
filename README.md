@@ -121,7 +121,9 @@ run     = shellcheck -x
   — one pass shows you everything to fix.
 - The staged set never includes deletions or symlinks: neither has content a lane can read, and
   handing one to a formatter fails for the wrong reason.
-- An empty staged set (`commit --amend --no-edit`) runs nothing and exits 0.
+- An empty staged set (`commit --amend --no-edit`) runs no `staged` lane — there is nothing to hand
+  it. A `tree` lane still runs: its invariant does not depend on what changed, and that is the lane
+  you least want going quiet.
 - A missing command warns and skips. `require = true` makes it fail instead.
 - Commands are split on whitespace, with no quoting. If you need quoting, call a script.
 
