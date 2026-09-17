@@ -139,6 +139,9 @@ run_commit_msg_output() {
 # A throwaway repo in $repo, its conf read from stdin. Not a command
 # substitution: a heredoc inside $( ) has its body outside it, which bash
 # warns about and then guesses at.
+#
+# Every body here is `<<-`, which strips leading tabs only. A fixture line
+# that must keep its indentation indents with spaces.
 mkrepo() {
 	repo=$(mktemp -d -p "$tmproot") || return 1
 	git -C "$repo" init -q
@@ -157,17 +160,17 @@ in_repo() {
 # going quiet there is how a require = true group stops guarding unnoticed.
 case_empty_staged() {
 	local out
-	mkrepo <<'CONF' || return
-schema = 1
+	mkrepo <<-'CONF' || return
+		schema = 1
 
-[group whole]
-scope = tree
-run   = printf ran-tree\n
+		[group whole]
+		scope = tree
+		run   = printf ran-tree\n
 
-[group paths]
-scope = staged
-run   = printf ran-staged:%s\n
-CONF
+		[group paths]
+		scope = staged
+		run   = printf ran-staged:%s\n
+	CONF
 	out=$(in_repo pre-commit)
 	want_exit 'pre-commit/empty set exits 0' 0 $?
 	want_in 'pre-commit/a tree lane runs on an empty set' 'ran-tree' "$out"
@@ -178,14 +181,14 @@ CONF
 # The consumer case: an invariant lane on a tree with nothing to commit.
 case_check_clean_tree() {
 	local out
-	mkrepo <<'CONF' || return
-schema = 1
+	mkrepo <<-'CONF' || return
+		schema = 1
 
-[group whole]
-scope   = tree
-require = true
-run     = printf tree-ran\n
-CONF
+		[group whole]
+		scope   = tree
+		require = true
+		run     = printf tree-ran\n
+	CONF
 	printf 'x\n' >"$repo/a.sh"
 	git -C "$repo" add -A
 	git -C "$repo" commit -qm 'init'
@@ -197,19 +200,19 @@ CONF
 
 case_match_and_paths() {
 	local out
-	mkrepo <<'CONF' || return
-schema = 1
+	mkrepo <<-'CONF' || return
+		schema = 1
 
-[group shell]
-match = *.sh
-scope = staged
-run   = printf path:%s\n
+		[group shell]
+		match = *.sh
+		scope = staged
+		run   = printf path:%s\n
 
-[group docs]
-match = *.md
-scope = staged
-run   = printf doc:%s\n
-CONF
+		[group docs]
+		match = *.md
+		scope = staged
+		run   = printf doc:%s\n
+	CONF
 	mkdir -p "$repo/deep"
 	printf 'x\n' >"$repo/a.sh"
 	printf 'x\n' >"$repo/deep/b.sh"
@@ -226,17 +229,17 @@ CONF
 
 case_aggregate() {
 	local out
-	mkrepo <<'CONF' || return
-schema = 1
+	mkrepo <<-'CONF' || return
+		schema = 1
 
-[group first]
-match = *.sh
-run   = false
+		[group first]
+		match = *.sh
+		run   = false
 
-[group second]
-match = *.sh
-run   = printf second:%s\n
-CONF
+		[group second]
+		match = *.sh
+		run   = printf second:%s\n
+	CONF
 	printf 'x\n' >"$repo/a.sh"
 	git -C "$repo" add -A
 
@@ -247,18 +250,18 @@ CONF
 
 case_missing_tool() {
 	local out
-	mkrepo <<'CONF' || return
-schema = 1
+	mkrepo <<-'CONF' || return
+		schema = 1
 
-[group soft]
-match = *.sh
-run   = githooks-no-such-tool
+		[group soft]
+		match = *.sh
+		run   = githooks-no-such-tool
 
-[group hard]
-match   = *.sh
-require = true
-run     = githooks-no-such-tool-either
-CONF
+		[group hard]
+		match   = *.sh
+		require = true
+		run     = githooks-no-such-tool-either
+	CONF
 	printf 'x\n' >"$repo/a.sh"
 	git -C "$repo" add -A
 
@@ -271,13 +274,13 @@ CONF
 
 case_deleted_path() {
 	local out
-	mkrepo <<'CONF' || return
-schema = 1
+	mkrepo <<-'CONF' || return
+		schema = 1
 
-[group shell]
-match = *.sh
-run   = printf path:%s\n
-CONF
+		[group shell]
+		match = *.sh
+		run   = printf path:%s\n
+	CONF
 	printf 'x\n' >"$repo/gone.sh"
 	printf 'x\n' >"$repo/kept.sh"
 	git -C "$repo" add -A
@@ -291,14 +294,14 @@ CONF
 
 case_scope_tree() {
 	local out
-	mkrepo <<'CONF' || return
-schema = 1
+	mkrepo <<-'CONF' || return
+		schema = 1
 
-[group whole]
-match = *.sh
-scope = tree
-run   = printf tree-ran\n
-CONF
+		[group whole]
+		match = *.sh
+		scope = tree
+		run   = printf tree-ran\n
+	CONF
 	printf 'x\n' >"$repo/a.sh"
 	git -C "$repo" add -A
 
@@ -309,19 +312,19 @@ CONF
 
 case_fix_and_restage() {
 	local out staged
-	mkrepo <<'CONF' || return
-schema = 1
+	mkrepo <<-'CONF' || return
+		schema = 1
 
-[group shell]
-match = *.sh
-run   = printf check:%s\n
-fix   = tests/fixtures/touch.sh
-CONF
+		[group shell]
+		match = *.sh
+		run   = printf check:%s\n
+		fix   = tests/fixtures/touch.sh
+	CONF
 	mkdir -p "$repo/tests/fixtures"
-	cat >"$repo/tests/fixtures/touch.sh" <<'FIX'
-#!/usr/bin/env bash
-printf 'fixed\n' >> "$1"
-FIX
+	cat >"$repo/tests/fixtures/touch.sh" <<-'FIX'
+		#!/usr/bin/env bash
+		printf 'fixed\n' >> "$1"
+	FIX
 	chmod +x "$repo/tests/fixtures/touch.sh"
 	printf 'x\n' >"$repo/a.sh"
 	git -C "$repo" add a.sh
@@ -338,20 +341,20 @@ FIX
 # one path where the commit is refused anyway.
 case_fix_failure_never_stages() {
 	local out staged
-	mkrepo <<'CONF' || return
-schema = 1
+	mkrepo <<-'CONF' || return
+		schema = 1
 
-[group shell]
-match = *.sh
-run   = true
-fix   = tests/fixtures/halfway.sh
-CONF
+		[group shell]
+		match = *.sh
+		run   = true
+		fix   = tests/fixtures/halfway.sh
+	CONF
 	mkdir -p "$repo/tests/fixtures"
-	cat >"$repo/tests/fixtures/halfway.sh" <<'FIX'
-#!/usr/bin/env bash
-printf 'half\n' >"$1"
-exit 3
-FIX
+	cat >"$repo/tests/fixtures/halfway.sh" <<-'FIX'
+		#!/usr/bin/env bash
+		printf 'half\n' >"$1"
+		exit 3
+	FIX
 	chmod +x "$repo/tests/fixtures/halfway.sh"
 	printf 'whole\n' >"$repo/a.sh"
 	git -C "$repo" add a.sh
@@ -366,14 +369,14 @@ FIX
 
 case_fix_refuses_partial() {
 	local out
-	mkrepo <<'CONF' || return
-schema = 1
+	mkrepo <<-'CONF' || return
+		schema = 1
 
-[group shell]
-match = *.sh
-run   = printf check:%s\n
-fix   = true
-CONF
+		[group shell]
+		match = *.sh
+		run   = printf check:%s\n
+		fix   = true
+	CONF
 	printf 'one\n' >"$repo/a.sh"
 	git -C "$repo" add a.sh
 	printf 'two\n' >>"$repo/a.sh"
@@ -385,13 +388,13 @@ CONF
 
 case_check_sees_unstaged() {
 	local out
-	mkrepo <<'CONF' || return
-schema = 1
+	mkrepo <<-'CONF' || return
+		schema = 1
 
-[group shell]
-match = *.sh
-run   = printf path:%s\n
-CONF
+		[group shell]
+		match = *.sh
+		run   = printf path:%s\n
+	CONF
 	printf 'x\n' >"$repo/a.sh"
 	git -C "$repo" add -A
 	git -C "$repo" commit -qm 'init'
@@ -403,13 +406,13 @@ CONF
 
 case_check_sees_untracked() {
 	local out
-	mkrepo <<'CONF' || return
-schema = 1
+	mkrepo <<-'CONF' || return
+		schema = 1
 
-[group shell]
-match = *.sh
-run   = printf path:%s\n
-CONF
+		[group shell]
+		match = *.sh
+		run   = printf path:%s\n
+	CONF
 	printf 'ignored.sh\n' >"$repo/.gitignore"
 	printf 'x\n' >"$repo/a.sh"
 	git -C "$repo" add -A
@@ -428,14 +431,14 @@ CONF
 
 case_check_never_stages() {
 	local out staged
-	mkrepo <<'CONF' || return
-schema = 1
+	mkrepo <<-'CONF' || return
+		schema = 1
 
-[group shell]
-match = *.sh
-fix   = true
-run   = true
-CONF
+		[group shell]
+		match = *.sh
+		fix   = true
+		run   = true
+	CONF
 	printf 'x\n' >"$repo/a.sh"
 	git -C "$repo" add -A
 	git -C "$repo" commit -qm 'init'
@@ -449,10 +452,10 @@ CONF
 
 case_check_grades_stdin() {
 	local out
-	mkrepo <<'CONF' || return
-schema = 1
-types  = feat
-CONF
+	mkrepo <<-'CONF' || return
+		schema = 1
+		types  = feat
+	CONF
 	out=$(cd "$repo" &&
 		printf 'nope\n' |
 		GITHOOKS_CONF=$repo/hooks.conf "$engine" check - 2>&1)
@@ -462,13 +465,13 @@ CONF
 
 case_symlink_skipped() {
 	local out
-	mkrepo <<'CONF' || return
-schema = 1
+	mkrepo <<-'CONF' || return
+		schema = 1
 
-[group shell]
-match = *.sh
-run   = printf path:%s\n
-CONF
+		[group shell]
+		match = *.sh
+		run   = printf path:%s\n
+	CONF
 	printf 'x\n' >"$repo/a.sh"
 	ln -s a.sh "$repo/link.sh"
 	git -C "$repo" add -A
@@ -481,13 +484,13 @@ CONF
 
 case_runs_from_a_subdir() {
 	local out
-	mkrepo <<'CONF' || return
-schema = 1
+	mkrepo <<-'CONF' || return
+		schema = 1
 
-[group shell]
-match = *.sh
-run   = printf path:%s\n
-CONF
+		[group shell]
+		match = *.sh
+		run   = printf path:%s\n
+	CONF
 	mkdir -p "$repo/deep"
 	printf 'x\n' >"$repo/deep/a.sh"
 	git -C "$repo" add -A
@@ -499,12 +502,12 @@ CONF
 
 case_no_match_runs_always() {
 	local out
-	mkrepo <<'CONF' || return
-schema = 1
+	mkrepo <<-'CONF' || return
+		schema = 1
 
-[group always]
-run = printf ran\\n
-CONF
+		[group always]
+		run = printf ran\\n
+	CONF
 	printf 'x\n' >"$repo/a.sh"
 	git -C "$repo" add -A
 
@@ -514,14 +517,14 @@ CONF
 
 case_lane_failure_names_the_fixer() {
 	local out
-	mkrepo <<'CONF' || return
-schema = 1
+	mkrepo <<-'CONF' || return
+		schema = 1
 
-[group shell]
-match = *.sh
-run   = false
-fix   = true
-CONF
+		[group shell]
+		match = *.sh
+		run   = false
+		fix   = true
+	CONF
 	printf 'x\n' >"$repo/a.sh"
 	git -C "$repo" add -A
 
@@ -544,9 +547,9 @@ case_outside_a_repo() {
 
 case_cli_surface() {
 	local out
-	mkrepo <<'CONF' || return
-schema = 1
-CONF
+	mkrepo <<-'CONF' || return
+		schema = 1
+	CONF
 	out=$(in_repo version)
 	want_exit 'cli/version exits 0' 0 $?
 	want_in 'cli/version names the schema' 'schema' "$out"
@@ -568,32 +571,32 @@ CONF
 
 case_conf_errors() {
 	local out
-	mkrepo <<'CONF' || return
-schema = 1
-subjet_max = 72
-CONF
+	mkrepo <<-'CONF' || return
+		schema = 1
+		subjet_max = 72
+	CONF
 	out=$(in_repo check)
 	want_exit 'conf/unknown key exits 2' 2 $?
 	want_in 'conf/unknown key names the key' 'subjet_max' "$out"
 
-	mkrepo <<'CONF' || return
-schema      = 1
-subject_max = wide
-CONF
+	mkrepo <<-'CONF' || return
+		schema      = 1
+		subject_max = wide
+	CONF
 	out=$(in_repo check)
 	want_exit 'conf/bad value exits 2' 2 $?
 
-	mkrepo <<'CONF' || return
-schema = 99
-CONF
+	mkrepo <<-'CONF' || return
+		schema = 99
+	CONF
 	out=$(in_repo check)
 	want_exit 'conf/unknown schema exits 2' 2 $?
 	want_in 'conf/unknown schema names the stale side' 'stale' "$out"
 
-	mkrepo <<'CONF' || return
-[group shell
-run = true
-CONF
+	mkrepo <<-'CONF' || return
+		[group shell
+		run = true
+	CONF
 	out=$(in_repo check)
 	want_exit 'conf/malformed group header exits 2' 2 $?
 }

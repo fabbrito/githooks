@@ -729,16 +729,16 @@ cmd_check() {
 # --------------------------------------------------------------------- main
 
 usage() {
-	cat <<'EOF'
-usage: githooks <command> [args]
+	cat <<-'EOF'
+		usage: githooks <command> [args]
 
-  commit-msg <file>          grade a commit message
-  pre-commit [--fix]         run lanes over the staged set
-  check [--fix] [<file>|-]   run lanes over working changes, grade a message
-  version                    print the version
+		  commit-msg <file>          grade a commit message
+		  pre-commit [--fix]         run lanes over the staged set
+		  check [--fix] [<file>|-]   run lanes over working changes, grade a message
+		  version                    print the version
 
-exit: 0 ok, 1 rejected or a lane failed, 2 usage, config or environment
-EOF
+		exit: 0 ok, 1 rejected or a lane failed, 2 usage, config or environment
+	EOF
 }
 
 main() {
