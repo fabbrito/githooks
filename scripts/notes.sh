@@ -48,10 +48,18 @@ for section in "${sections[@]}"; do
 	printf '### %s\n\n%s' "$section" "${lines[$section]}"
 done
 
-if [[ -n $prev ]]; then
-	slug=$(git remote get-url origin) || die 'no origin'
+# A blob URL at the tag, not a raw one: it renders for anyone who can see
+# the repo, private or public, and names the exact bytes this release ships
+# rather than whatever master holds today. No origin - a bare clone - just
+# means no links.
+slug=$(git remote get-url origin 2>/dev/null)
+if [[ -n $slug ]]; then
 	slug=${slug%.git}
 	slug=${slug#*github.com[:/]}
-	printf '\n**Full changelog**: https://github.com/%s/compare/%s...%s\n' \
-		"$slug" "$prev" "$tag"
+	printf '\n**The engine**: https://github.com/%s/blob/%s/bin/githooks\n' \
+		"$slug" "$tag"
+	if [[ -n $prev ]]; then
+		printf '**Full changelog**: https://github.com/%s/compare/%s...%s\n' \
+			"$slug" "$prev" "$tag"
+	fi
 fi
