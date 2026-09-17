@@ -128,7 +128,6 @@ run_commit_msg_output() {
 	want_exit 'commit-msg GITHOOKS_SKIP passes anything' 0 $?
 
 	# A rebase replays messages it did not author.
-	git -C "$fixture_repo" rev-parse --git-path rebase-merge >/dev/null
 	mkdir -p "$fixture_repo/.git/rebase-merge"
 	grade bad-shape >/dev/null 2>&1
 	want_exit 'commit-msg/mid-rebase grades nothing' 0 $?
@@ -412,6 +411,73 @@ CONF
 		'path:deep/a.sh' "$out"
 }
 
+case_no_match_runs_always() {
+	local out
+	mkrepo <<'CONF' || return
+schema = 1
+
+[group always]
+run = printf ran\\n
+CONF
+	printf 'x\n' >"$repo/a.sh"
+	git -C "$repo" add -A
+
+	out=$(in_repo pre-commit)
+	want_in 'pre-commit/a group with no match always runs' 'ran' "$out"
+}
+
+case_lane_failure_names_the_fixer() {
+	local out
+	mkrepo <<'CONF' || return
+schema = 1
+
+[group shell]
+match = *.sh
+run   = false
+fix   = true
+CONF
+	printf 'x\n' >"$repo/a.sh"
+	git -C "$repo" add -A
+
+	out=$(in_repo pre-commit)
+	want_exit 'pre-commit/a failed lane exits 1' 1 $?
+	want_in 'pre-commit/a failed lane names the fixer' '--fix' "$out"
+}
+
+# Regression: `die` used to run inside $(git_root), so it exited that subshell
+# and the engine carried on with an empty root and passed the commit.
+case_outside_a_repo() {
+	local dir out
+	dir=$(mktemp -d -p "$tmproot") || return
+	printf 'schema = 1\n' >"$dir/hooks.conf"
+
+	out=$(cd "$dir" && GITHOOKS_CONF=$dir/hooks.conf "$engine" pre-commit 2>&1)
+	want_exit 'engine/outside a repo exits 2' 2 $?
+	want_in 'engine/outside a repo says so' 'not inside a git repository' "$out"
+}
+
+case_cli_surface() {
+	local out
+	mkrepo <<'CONF' || return
+schema = 1
+CONF
+	out=$(in_repo version)
+	want_exit 'cli/version exits 0' 0 $?
+	want_in 'cli/version names the schema' 'schema' "$out"
+
+	in_repo >/dev/null 2>&1
+	want_exit 'cli/no arguments exits 2' 2 $?
+
+	in_repo not-a-command >/dev/null 2>&1
+	want_exit 'cli/an unknown command exits 2' 2 $?
+
+	in_repo commit-msg >/dev/null 2>&1
+	want_exit 'cli/commit-msg with no file exits 2' 2 $?
+
+	in_repo pre-commit --nope >/dev/null 2>&1
+	want_exit 'cli/an unknown flag exits 2' 2 $?
+}
+
 # ------------------------------------------------------------------ config
 
 case_conf_errors() {
@@ -464,6 +530,10 @@ case_check_never_stages
 case_check_grades_stdin
 case_symlink_skipped
 case_runs_from_a_subdir
+case_no_match_runs_always
+case_lane_failure_names_the_fixer
+case_outside_a_repo
+case_cli_surface
 case_conf_errors
 
 printf '\n%d passed, %d failed\n' "$passed" "$failed"

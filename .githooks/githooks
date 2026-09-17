@@ -10,7 +10,8 @@
 #   githooks check [--fix] [<file>|-]   lanes over working changes, + a message
 #   githooks version                    print the version
 #
-# Exit: 0 ok, 1 rejected or a lane failed, 2 usage or config error.
+# Exit: 0 ok, 1 rejected or a lane failed, 2 usage, config or a broken
+# environment.
 #
 # No errexit on purpose: a failing lane is data, not a reason to abort.
 set -uo pipefail
@@ -50,8 +51,9 @@ fi
 status=0
 scope_rejected=0
 
-# A usage or config problem. Never 1: a broken conf must not read as a
-# rejected commit.
+# A usage, config or environment problem - including git itself failing.
+# Never 1: none of these judged the commit, and a 1 invites --no-verify as
+# the fix when the real problem is the machine.
 die() {
 	printf '%s%s: %s%s\n' "$red" "$prog" "$*" "$reset" >&2
 	exit 2
@@ -94,22 +96,6 @@ conf_defaults() {
 # other value has an inline # comment stripped.
 is_command_key() {
 	[[ $1 == run || $1 == fix ]]
-}
-
-conf_key_known() {
-	case $1 in
-		schema | types | subject_max | bullet_max | body_cols) return 0 ;;
-		trailer_person | trailer_reference) return 0 ;;
-		scope_fixed | scope_root) return 0 ;;
-	esac
-	return 1
-}
-
-group_key_known() {
-	case $1 in
-		match | scope | run | fix | require) return 0 ;;
-	esac
-	return 1
 }
 
 # Append to a newline-joined accumulator.
@@ -162,18 +148,20 @@ parse_conf() {
 		fi
 		value=${value%"${value##*[![:space:]]}"}
 
+		# conf_defaults already holds every key there is, so "has a
+		# default" is the whole validator - no second list to drift.
 		if [[ -z $group ]]; then
-			conf_key_known "$key" ||
-				die "$file:$lineno: unknown key: $key"
 			case $key in
 				scope_root) append "conf[scope_root]" "$value" ;;
-				*) conf[$key]=$value ;;
+				*)
+					[[ -n ${conf[$key]+set} ]] ||
+						die "$file:$lineno: unknown key: $key"
+					conf[$key]=$value
+					;;
 			esac
 			continue
 		fi
 
-		group_key_known "$key" ||
-			die "$file:$lineno: unknown key in [group $group]: $key"
 		case $key in
 			match) g_match[$group]=$value ;;
 			scope)
@@ -188,6 +176,7 @@ parse_conf() {
 				;;
 			run) append "g_run[$group]" "$value" ;;
 			fix) append "g_fix[$group]" "$value" ;;
+			*) die "$file:$lineno: unknown key in [group $group]: $key" ;;
 		esac
 	done <"$file"
 }
@@ -197,10 +186,12 @@ check_schema() {
 	[[ $declared =~ ^[0-9]+$ ]] ||
 		die "schema must be a number, got: $declared"
 	((declared == SCHEMA)) && return 0
+	local speaks="hooks.conf declares schema $declared; githooks"
+	speaks+=" $VERSION speaks schema $SCHEMA"
 	if ((declared > SCHEMA)); then
-		die "hooks.conf declares schema $declared; this engine ($VERSION) speaks $SCHEMA - the engine is stale, re-vendor it"
+		die "$speaks - the engine is stale, re-vendor it"
 	fi
-	die "hooks.conf declares schema $declared; this engine ($VERSION) speaks $SCHEMA - the config is stale, see MIGRATIONS.md"
+	die "$speaks - the config is stale, see the README"
 }
 
 check_numbers() {
@@ -222,11 +213,11 @@ load_conf() {
 
 # --------------------------------------------------------------- git basics
 
-git_root() {
-	local out
-	out=$(git rev-parse --show-toplevel 2>/dev/null) ||
+# Sets $root. Never a command substitution: `die` inside $( ) exits only that
+# subshell, and the caller carries on with an empty root.
+find_root() {
+	root=$(git rev-parse --show-toplevel 2>/dev/null) ||
 		die 'not inside a git repository'
-	printf '%s' "$out"
 }
 
 # Mid-rebase? .git is a file in a worktree, so ask git for the real dir.
@@ -248,37 +239,53 @@ keep_path() {
 	[[ -f $1 && ! -L $1 ]]
 }
 
-# Paths of the staged set: added/copied/modified/renamed, never deleted -
-# handing a deleted path to shfmt fails for the wrong reason.
-read_staged() {
-	local path
-	files=()
+# Read a NUL-delimited path list from git into the named array.
+#
+# Through a temp file, not `< <(git ...)`: a process substitution throws its
+# exit status away, so a git that fails reads as "nothing changed" and the
+# gate passes. A gate that passes on error is worse than no gate.
+read_paths() {
+	local -n dest=$1
+	local filter=$2
+	shift 2
+
+	local tmp path
+	tmp=$(mktemp "${TMPDIR:-/tmp}/githooks.XXXXXX") ||
+		die 'cannot create a temp file'
+	if ! git "$@" >"$tmp"; then
+		rm -f "$tmp"
+		die "git $1 failed"
+	fi
+
+	dest=()
 	while IFS= read -r -d '' path; do
-		keep_path "$path" && files+=("$path")
-	done < <(git diff --cached --name-only --diff-filter=ACMR -z)
+		if $filter; then
+			keep_path "$path" && dest+=("$path")
+		else
+			dest+=("$path")
+		fi
+	done <"$tmp"
+	rm -f "$tmp"
+}
+
+# The staged set: added/copied/modified/renamed, never deleted.
+read_staged() {
+	read_paths files true diff --cached --name-only --diff-filter=ACMR -z
 }
 
 # What `check` judges: tracked files that differ from HEAD, staged or not.
 # `check` answers "is what I am about to commit acceptable", and before
 # `git add` that is the working tree.
 read_worktree() {
-	local path
-	files=()
 	if has_head; then
-		while IFS= read -r -d '' path; do
-			keep_path "$path" && files+=("$path")
-		done < <(git diff --name-only --diff-filter=ACMR -z HEAD)
+		read_paths files true diff --name-only --diff-filter=ACMR -z HEAD
 	else
 		read_staged
 	fi
 }
 
 read_unstaged() {
-	local path
-	unstaged=()
-	while IFS= read -r -d '' path; do
-		unstaged+=("$path")
-	done < <(git diff --name-only --diff-filter=ACMR -z)
+	read_paths unstaged false diff --name-only --diff-filter=ACMR -z
 }
 
 # -------------------------------------------------------------- commit-msg
@@ -361,17 +368,18 @@ print_shape() {
 }
 
 grade_subject() {
-	local subject=$1 type scope text types=()
+	local subject=$1 type parens scope text types=()
 	read -r -a types <<<"${conf[types]}"
 
 	if [[ ! $subject =~ $re_subject ]]; then
-		reject "subject is not type(scope): subject" \
+		reject 'subject is not type(scope): subject' \
 			"got:   $subject" \
 			'write: feat(hooks): add the dispatcher'
 		return
 	fi
 
 	type=${BASH_REMATCH[1]}
+	parens=${BASH_REMATCH[2]}
 	scope=${BASH_REMATCH[3]}
 	text=${BASH_REMATCH[4]}
 
@@ -380,7 +388,9 @@ grade_subject() {
 			"write: one of ${conf[types]}"
 	fi
 
-	if [[ $subject == *'('*')'* ]]; then
+	# The capture group, not the raw line: a subject whose text carries
+	# parens - "add foo (bar)" - has no scope and is not an empty one.
+	if [[ -n $parens ]]; then
 		if [[ -z $scope ]]; then
 			reject 'empty scope' \
 				'write: drop the parens, or name a scope'
@@ -484,7 +494,8 @@ grade_body() {
 
 		((bullets++))
 		if ((${#line} > conf[body_cols])); then
-			reject "bullet is ${#line} chars, max is ${conf[body_cols]} (line $((i + 1)))" \
+			reject "bullet is ${#line} chars, max is\
+ ${conf[body_cols]} (line $((i + 1)))" \
 				'write: wrap it into two bullets, or cut it'
 		fi
 	done
@@ -496,7 +507,7 @@ grade_body() {
 }
 
 cmd_commit_msg() {
-	[[ $# -eq 1 ]] || die 'usage: githooks commit-msg <file>'
+	(($# == 1)) || die 'usage: githooks commit-msg <file>'
 
 	if [[ -n ${GITHOOKS_SKIP:-} ]]; then
 		return 0
@@ -548,7 +559,7 @@ path_matches() {
 # Run one command line against a path set. Commands are split on whitespace:
 # no quoting, by design. Anything that needs quoting belongs in a script.
 run_lane() {
-	local group=$1 line=$2 append_paths=$3
+	local group=$1 line=$2 with_paths=$3
 	shift 3
 	local cmd=()
 	read -r -a cmd <<<"$line"
@@ -556,7 +567,7 @@ run_lane() {
 	((${#cmd[@]} == 0)) && return 0
 
 	if ! command -v "${cmd[0]}" >/dev/null 2>&1; then
-		if [[ ${g_require[$group]} == true ]]; then
+		if ${g_require[$group]}; then
 			reject "[$group] ${cmd[0]} not found" \
 				"write: install ${cmd[0]}, or set require = false"
 			return 1
@@ -566,7 +577,7 @@ run_lane() {
 	fi
 
 	note "${bold}==>${reset} [$group] $line"
-	if [[ $append_paths == yes ]]; then
+	if $with_paths; then
 		"${cmd[@]}" "$@" || return 1
 	else
 		"${cmd[@]}" || return 1
@@ -594,7 +605,7 @@ run_group() {
 	fi
 
 	commands=${g_run[$group]}
-	if [[ $fix == yes && -n ${g_fix[$group]} ]]; then
+	if $fix && [[ -n ${g_fix[$group]} ]]; then
 		commands=${g_fix[$group]}
 		refuse_partial "$group" "${matched[@]}" || return 1
 	fi
@@ -605,17 +616,24 @@ run_group() {
 	while IFS= read -r line; do
 		[[ -z $line ]] && continue
 		if [[ $scope == staged ]]; then
-			run_lane "$group" "$line" yes "${matched[@]}" || failed=1
+			run_lane "$group" "$line" true "${matched[@]}" || failed=1
 		else
-			run_lane "$group" "$line" no || failed=1
+			run_lane "$group" "$line" false || failed=1
 		fi
 	done <<<"$commands"
 
-	if [[ $fix == yes && -n ${g_fix[$group]} && $restage == yes ]]; then
+	if $fix && $restage && [[ -n ${g_fix[$group]} ]]; then
 		git add -- "${matched[@]}" || failed=1
 	fi
 
-	((failed)) && status=1
+	if ((failed)); then
+		# The one rejection that cannot name its replacement: the lane's
+		# own stderr carries that. Name the fixer when the group has one.
+		if ! $fix && [[ -n ${g_fix[$group]} ]]; then
+			note "  write: rerun with --fix to apply [$group]'s fixer"
+		fi
+		status=1
+	fi
 	return 0
 }
 
@@ -624,7 +642,7 @@ run_group() {
 refuse_partial() {
 	local group=$1 path
 	shift
-	[[ $restage == yes ]] || return 0
+	$restage || return 0
 
 	local partial=()
 	for path in "$@"; do
@@ -650,30 +668,30 @@ dispatch() {
 }
 
 cmd_pre_commit() {
-	local fix=no
+	local fix=false
 
 	while (($# > 0)); do
 		case $1 in
-			--fix) fix=yes ;;
-			*) die "usage: githooks pre-commit [--fix]" ;;
+			--fix) fix=true ;;
+			*) die 'usage: githooks pre-commit [--fix]' ;;
 		esac
 		shift
 	done
 
 	[[ -n ${GITHOOKS_SKIP:-} ]] && return 0
 
-	restage=yes
+	restage=true
 	read_staged
 	read_unstaged
 	dispatch "$fix"
 }
 
 cmd_check() {
-	local fix=no msgfile=''
+	local fix=false msgfile=''
 
 	while (($# > 0)); do
 		case $1 in
-			--fix) fix=yes ;;
+			--fix) fix=true ;;
 			-*)
 				[[ $1 == '-' ]] || die 'usage: githooks check [--fix] [<file>|-]'
 				msgfile=$1
@@ -685,7 +703,7 @@ cmd_check() {
 
 	# No re-staging here: these files were never staged, and staging them
 	# would commit a decision the user has not made.
-	restage=no
+	restage=false
 	read_worktree
 	unstaged=()
 	dispatch "$fix"
@@ -705,7 +723,7 @@ usage: githooks <command> [args]
   check [--fix] [<file>|-]   run lanes over working changes, grade a message
   version                    print the version
 
-exit: 0 ok, 1 rejected or a lane failed, 2 usage or config error
+exit: 0 ok, 1 rejected or a lane failed, 2 usage, config or environment
 EOF
 }
 
@@ -729,7 +747,7 @@ main() {
 			;;
 	esac
 
-	root=$(git_root)
+	find_root
 	# Git runs hooks from the top level; `check` may be run from anywhere, and
 	# every path git hands us is relative to the root.
 	cd "$root" || die "cannot enter $root"
@@ -752,7 +770,7 @@ files=()
 unstaged=()
 lines=()
 scopes=()
-restage=no
+restage=false
 root=''
 
 main "$@"
