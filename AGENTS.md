@@ -17,8 +17,8 @@ hand-edit it.
 
 - Every rejection says what is wrong **and what to write instead**. Only the first half is an
   unfinished feature.
-- Exit 2 for usage and config, 1 only for a real rejection. A broken `hooks.conf` must never read as
-  a rejected commit.
+- Exit 2 for usage, config, or a broken environment (git failing, no repo); 1 only for a real
+  rejection. Nothing that failed to judge the commit may exit 1.
 - Aggregate: grade the whole message, run every matching group. One pass, everything to fix.
 
 ## Shell

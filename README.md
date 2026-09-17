@@ -76,9 +76,11 @@ fresh clone is covered without anyone remembering. A node repo can put it in `pr
 | `githooks pre-commit [--fix]`        | Run lanes over the staged set. Called by the shim.                                                             |
 | `githooks check [--fix] [<file>\|-]` | The gate for humans and agents: lanes over working changes, plus a message when one is given. `-` reads stdin. |
 | `githooks version`                   | Print the version and schema.                                                                                  |
+| `githooks help`, `-h`, `--help`      | Print the command list.                                                                                        |
 
-Exit codes: `0` ok, `1` rejected or a lane failed, `2` usage or config error. `2` is distinct on
-purpose, so a broken `hooks.conf` is never mistaken for a rejected commit.
+Exit codes: `0` ok, `1` rejected or a lane failed, `2` usage, config, or a broken environment —
+including git itself failing. `2` is distinct on purpose: none of those judged your commit, and a
+`1` invites `--no-verify` as the fix when the real problem is the machine.
 
 `GITHOOKS_SKIP=1` passes anything. `GITHOOKS_CONF=<file>` points at another config, which is how the
 tests run.
@@ -120,7 +122,8 @@ run     = shellcheck -x
 - `scope = staged` appends the matched paths to each command; `tree` runs it as written.
 - Groups run in order, **every** matching group runs even after one fails, and the status aggregates
   — one pass shows you everything to fix.
-- The staged set never includes deletions, so a deleted file is not handed to a formatter.
+- The staged set never includes deletions or symlinks: neither has content a lane can read, and
+  handing one to a formatter fails for the wrong reason.
 - An empty staged set (`commit --amend --no-edit`) runs nothing and exits 0.
 - A missing command warns and skips. `require = true` makes it fail instead.
 - Commands are split on whitespace, with no quoting. If you need quoting, call a script.
@@ -128,7 +131,8 @@ run     = shellcheck -x
 `--fix` swaps `run` for `fix`. Under `pre-commit --fix` the matched paths are re-staged, which is
 the only thing this tool ever mutates — and it **refuses** when a matched file has both staged and
 unstaged changes, rather than swallowing the half you left out. `check --fix` formats but never
-stages: those files were never staged, and staging them would make a decision you have not made.
+stages, so it has nothing to swallow and never refuses: those files were never staged, and staging
+them would make a decision you have not made.
 
 Anything the config cannot express — a vault guard, a secret scan — is a script the config calls, or
 a native `pre-commit` that runs the engine and then its own guard. The format does not grow

@@ -5,8 +5,9 @@
 # split on whitespace; `run` and `fix` take the rest of the line verbatim.
 # Every key below has the default shown, so a three-line config is valid.
 #
-# Unknown key, bad value, unknown schema: exit 2. Never exit 1 - a broken
-# config must not read as a rejected commit.
+# Unknown key, bad value, unknown schema: exit 2, along with anything else
+# that stopped the engine judging your commit. Never exit 1 - a broken config
+# is not a rejected commit.
 
 # The config format this file is written against. Absent means 1.
 schema = 1
