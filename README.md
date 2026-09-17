@@ -24,15 +24,12 @@ the shape:
 
 ## Vendor it
 
-```bash
-mkdir -p .githooks
-curl -fsSL https://raw.githubusercontent.com/fabbrito/githooks/v1.0.0/bin/githooks \
-  -o .githooks/githooks
-chmod +x .githooks/githooks
-cp /path/to/githooks/hooks.conf.example .githooks/hooks.conf   # then edit it
-```
+Take `bin/githooks` from [the repo](https://github.com/fabbrito/githooks), at the tag you want, and
+put it in `.githooks/githooks`, executable. How you fetch it is yours: `curl`, `gh`, a copy out of a
+local clone, whatever your repo already does.
 
-Two shims, identical in every repo:
+Then `hooks.conf` beside it — start from `hooks.conf.example` — and two shims, identical in every
+repo:
 
 ```bash
 # .githooks/commit-msg
@@ -44,7 +41,7 @@ exec "$(dirname "$0")/githooks" commit-msg "$@"
 
 `.githooks/pre-commit` is the same line with `pre-commit "$@"`. Commit all four files.
 
-Updating is the same `curl` at a newer tag. There is no lock file and no self-update: see
+Updating is the same thing again at a newer tag. There is no lock file and no self-update: see
 [Not here](#not-here).
 
 ## Enable it

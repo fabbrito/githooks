@@ -47,8 +47,9 @@ if [[ -n $previous ]]; then
 else
 	notes=$(git log --pretty='- %s' "$tag")
 fi
-raw=https://raw.githubusercontent.com/fabbrito/githooks/$tag/bin/githooks
-notes+=$'\n\nVendor it:\n\n    curl -fsSL '$raw$' -o .githooks/githooks'
+# The repo, never a raw file URL: one stays true whether this repo is
+# private or public, the other 404s for anyone without a token.
+notes+=$'\n\nVendor it: https://github.com/fabbrito/githooks'
 
 if $dry; then
 	printf 'publish: would send master and %s to origin, then:\n' "$tag"
