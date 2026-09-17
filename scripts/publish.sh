@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 #
 # Publish what `make release` tagged: master and the tag to origin, then a
-# GitHub release. Consumers fetch the engine from the tag's raw URL, so the
-# tag is the artifact - nothing is uploaded.
+# GitHub release carrying scripts/notes.sh's notes. The tag is the artifact -
+# nothing is uploaded.
 #   make publish [DRY_RUN=1]
 #
 # A release is never moved after this. A bad one gets the next patch.
 #
-# A dry run touches neither origin nor gh, and reports every refusal.
+# A dry run touches neither origin nor gh, reports every refusal instead of
+# the first, and prints the notes it would send.
 #
 # No errexit: each step is checked where it can fail.
 set -uo pipefail
@@ -41,27 +42,25 @@ grep -q "^VERSION='$tag'\$" bin/githooks ||
 	refuse "bin/githooks is not stamped $tag"
 command -v gh >/dev/null 2>&1 || refuse 'gh not found'
 
-previous=$(git describe --tags --abbrev=0 "$tag^" 2>/dev/null)
-if [[ -n $previous ]]; then
-	notes=$(git log --pretty='- %s' "$previous..$tag")
-else
-	notes=$(git log --pretty='- %s' "$tag")
-fi
-# The repo, never a raw file URL: one stays true whether this repo is
-# private or public, the other 404s for anyone without a token.
-notes+=$'\n\nVendor it: https://github.com/fabbrito/githooks'
+# A file, not a string: the notes are a document, and `gh --notes-file` takes
+# one. Their shape is notes.sh's problem, and it runs standalone.
+notes=$(mktemp "${TMPDIR:-/tmp}/githooks-notes.XXXXXX") || die 'mktemp failed'
+trap 'rm -f "$notes"' EXIT
+scripts/notes.sh "$tag" >"$notes" || die 'notes failed'
 
 if $dry; then
 	printf 'publish: would send master and %s to origin, then:\n' "$tag"
-	printf '  gh release create %s --title %s --notes ...\n' "$tag" "$tag"
-	printf -- '--- notes ---\n%s\n' "$notes"
+	printf '  gh release create %s --title "githooks %s" --notes-file -\n' \
+		"$tag" "$tag"
+	printf -- '--- notes ---\n'
+	cat "$notes"
 	((refusals > 0)) && exit 1
 	exit 0
 fi
 
 git push origin master || die 'cannot push master'
 git push origin "$tag" || die 'cannot push the tag'
-gh release create "$tag" --title "$tag" --notes "$notes" ||
+gh release create "$tag" --title "githooks $tag" --notes-file "$notes" ||
 	die 'gh release failed'
 
 printf 'publish: %s is up\n' "$tag"
