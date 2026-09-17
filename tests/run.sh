@@ -84,6 +84,7 @@ want_not_in() {
 # run inside a repo. Its own, never this one: a rebase in progress here would
 # otherwise pass every fixture.
 fixture_repo=''
+repo=''
 
 make_fixture_repo() {
 	fixture_repo=$(mktemp -d -p "$tmproot") || return 1
@@ -136,40 +137,38 @@ run_commit_msg_output() {
 
 # ------------------------------------------------------------- dispatcher
 
-# A throwaway repo, its conf on stdin.
+# A throwaway repo in $repo, its conf read from stdin. Not a command
+# substitution: a heredoc inside $( ) has its body outside it, which bash
+# warns about and then guesses at.
 mkrepo() {
-	local dir
-	dir=$(mktemp -d -p "$tmproot") || return 1
-	git -C "$dir" init -q
-	git -C "$dir" config user.email 'test@example.com'
-	git -C "$dir" config user.name 'test'
-	cat >"$dir/hooks.conf"
-	printf '%s' "$dir"
+	repo=$(mktemp -d -p "$tmproot") || return 1
+	git -C "$repo" init -q
+	git -C "$repo" config user.email 'test@example.com'
+	git -C "$repo" config user.name 'test'
+	cat >"$repo/hooks.conf"
 }
 
-# Run the engine inside a fixture repo, stderr folded in.
+# Run the engine inside the current fixture repo, stderr folded in.
 in_repo() {
-	local dir=$1
-	shift
-	(cd "$dir" && GITHOOKS_CONF=$dir/hooks.conf "$engine" "$@" 2>&1)
+	(cd "$repo" && GITHOOKS_CONF=$repo/hooks.conf "$engine" "$@" 2>&1)
 }
 
 case_empty_staged() {
-	local dir out
-	dir=$(mkrepo <<'CONF') || return
+	local out
+	mkrepo <<'CONF' || return
 schema = 1
 
 [group always]
 run = printf ran:%s\n always
 CONF
-	out=$(in_repo "$dir" pre-commit)
+	out=$(in_repo pre-commit)
 	want_exit 'pre-commit/empty set exits 0' 0 $?
 	want_not_in 'pre-commit/empty set runs nothing' 'ran:' "$out"
 }
 
 case_match_and_paths() {
-	local dir out
-	dir=$(mkrepo <<'CONF') || return
+	local out
+	mkrepo <<'CONF' || return
 schema = 1
 
 [group shell]
@@ -182,13 +181,13 @@ match = *.md
 scope = staged
 run   = printf doc:%s\n
 CONF
-	mkdir -p "$dir/deep"
-	printf 'x\n' >"$dir/a.sh"
-	printf 'x\n' >"$dir/deep/b.sh"
-	printf 'x\n' >"$dir/c.txt"
-	git -C "$dir" add -A
+	mkdir -p "$repo/deep"
+	printf 'x\n' >"$repo/a.sh"
+	printf 'x\n' >"$repo/deep/b.sh"
+	printf 'x\n' >"$repo/c.txt"
+	git -C "$repo" add -A
 
-	out=$(in_repo "$dir" pre-commit)
+	out=$(in_repo pre-commit)
 	want_exit 'pre-commit/matching exits 0' 0 $?
 	want_in 'pre-commit/appends the matched path' 'path:a.sh' "$out"
 	want_in 'pre-commit/glob crosses a slash' 'path:deep/b.sh' "$out"
@@ -197,8 +196,8 @@ CONF
 }
 
 case_aggregate() {
-	local dir out
-	dir=$(mkrepo <<'CONF') || return
+	local out
+	mkrepo <<'CONF' || return
 schema = 1
 
 [group first]
@@ -209,17 +208,17 @@ run   = false
 match = *.sh
 run   = printf second:%s\n
 CONF
-	printf 'x\n' >"$dir/a.sh"
-	git -C "$dir" add -A
+	printf 'x\n' >"$repo/a.sh"
+	git -C "$repo" add -A
 
-	out=$(in_repo "$dir" pre-commit)
+	out=$(in_repo pre-commit)
 	want_exit 'pre-commit/a failed lane exits 1' 1 $?
 	want_in 'pre-commit/later groups still run' 'second:a.sh' "$out"
 }
 
 case_missing_tool() {
-	local dir out
-	dir=$(mkrepo <<'CONF') || return
+	local out
+	mkrepo <<'CONF' || return
 schema = 1
 
 [group soft]
@@ -231,10 +230,10 @@ match   = *.sh
 require = true
 run     = githooks-no-such-tool-either
 CONF
-	printf 'x\n' >"$dir/a.sh"
-	git -C "$dir" add -A
+	printf 'x\n' >"$repo/a.sh"
+	git -C "$repo" add -A
 
-	out=$(in_repo "$dir" pre-commit)
+	out=$(in_repo pre-commit)
 	want_exit 'pre-commit/require = true fails' 1 $?
 	want_in 'pre-commit/a missing tool warns' 'skip' "$out"
 	want_in 'pre-commit/require = true says what to install' \
@@ -242,28 +241,28 @@ CONF
 }
 
 case_deleted_path() {
-	local dir out
-	dir=$(mkrepo <<'CONF') || return
+	local out
+	mkrepo <<'CONF' || return
 schema = 1
 
 [group shell]
 match = *.sh
 run   = printf path:%s\n
 CONF
-	printf 'x\n' >"$dir/gone.sh"
-	printf 'x\n' >"$dir/kept.sh"
-	git -C "$dir" add -A
-	git -C "$dir" commit -qm 'init'
-	git -C "$dir" rm -q gone.sh
+	printf 'x\n' >"$repo/gone.sh"
+	printf 'x\n' >"$repo/kept.sh"
+	git -C "$repo" add -A
+	git -C "$repo" commit -qm 'init'
+	git -C "$repo" rm -q gone.sh
 
-	out=$(in_repo "$dir" pre-commit)
+	out=$(in_repo pre-commit)
 	want_not_in 'pre-commit/a deleted path never reaches a lane' \
 		'path:gone.sh' "$out"
 }
 
 case_scope_tree() {
-	local dir out
-	dir=$(mkrepo <<'CONF') || return
+	local out
+	mkrepo <<'CONF' || return
 schema = 1
 
 [group whole]
@@ -271,17 +270,17 @@ match = *.sh
 scope = tree
 run   = printf tree-ran\n
 CONF
-	printf 'x\n' >"$dir/a.sh"
-	git -C "$dir" add -A
+	printf 'x\n' >"$repo/a.sh"
+	git -C "$repo" add -A
 
-	out=$(in_repo "$dir" pre-commit)
+	out=$(in_repo pre-commit)
 	want_in 'pre-commit/scope = tree takes no paths' 'tree-ran' "$out"
 	want_not_in 'pre-commit/scope = tree really takes none' 'a.sh' "$out"
 }
 
 case_fix_and_restage() {
-	local dir out staged
-	dir=$(mkrepo <<'CONF') || return
+	local out staged
+	mkrepo <<'CONF' || return
 schema = 1
 
 [group shell]
@@ -289,25 +288,25 @@ match = *.sh
 run   = printf check:%s\n
 fix   = tests/fixtures/touch.sh
 CONF
-	mkdir -p "$dir/tests/fixtures"
-	cat >"$dir/tests/fixtures/touch.sh" <<'FIX'
+	mkdir -p "$repo/tests/fixtures"
+	cat >"$repo/tests/fixtures/touch.sh" <<'FIX'
 #!/usr/bin/env bash
 printf 'fixed\n' >> "$1"
 FIX
-	chmod +x "$dir/tests/fixtures/touch.sh"
-	printf 'x\n' >"$dir/a.sh"
-	git -C "$dir" add a.sh
+	chmod +x "$repo/tests/fixtures/touch.sh"
+	printf 'x\n' >"$repo/a.sh"
+	git -C "$repo" add a.sh
 
-	out=$(in_repo "$dir" pre-commit --fix)
+	out=$(in_repo pre-commit --fix)
 	want_exit 'pre-commit/--fix exits 0' 0 $?
 	want_not_in 'pre-commit/--fix replaces run' 'check:' "$out"
-	staged=$(git -C "$dir" show ':a.sh')
+	staged=$(git -C "$repo" show ':a.sh')
 	want_in 'pre-commit/--fix re-stages the result' 'fixed' "$staged"
 }
 
 case_fix_refuses_partial() {
-	local dir out
-	dir=$(mkrepo <<'CONF') || return
+	local out
+	mkrepo <<'CONF' || return
 schema = 1
 
 [group shell]
@@ -315,36 +314,36 @@ match = *.sh
 run   = printf check:%s\n
 fix   = true
 CONF
-	printf 'one\n' >"$dir/a.sh"
-	git -C "$dir" add a.sh
-	printf 'two\n' >>"$dir/a.sh"
+	printf 'one\n' >"$repo/a.sh"
+	git -C "$repo" add a.sh
+	printf 'two\n' >>"$repo/a.sh"
 
-	out=$(in_repo "$dir" pre-commit --fix)
+	out=$(in_repo pre-commit --fix)
 	want_exit 'pre-commit/--fix refuses a partial stage' 1 $?
 	want_in 'pre-commit/--fix names the partial file' 'a.sh' "$out"
 }
 
 case_check_sees_unstaged() {
-	local dir out
-	dir=$(mkrepo <<'CONF') || return
+	local out
+	mkrepo <<'CONF' || return
 schema = 1
 
 [group shell]
 match = *.sh
 run   = printf path:%s\n
 CONF
-	printf 'x\n' >"$dir/a.sh"
-	git -C "$dir" add -A
-	git -C "$dir" commit -qm 'init'
-	printf 'y\n' >>"$dir/a.sh"
+	printf 'x\n' >"$repo/a.sh"
+	git -C "$repo" add -A
+	git -C "$repo" commit -qm 'init'
+	printf 'y\n' >>"$repo/a.sh"
 
-	out=$(in_repo "$dir" check)
+	out=$(in_repo check)
 	want_in 'check/judges working changes, staged or not' 'path:a.sh' "$out"
 }
 
 case_check_never_stages() {
-	local dir out staged
-	dir=$(mkrepo <<'CONF') || return
+	local out staged
+	mkrepo <<'CONF' || return
 schema = 1
 
 [group shell]
@@ -352,63 +351,63 @@ match = *.sh
 fix   = true
 run   = true
 CONF
-	printf 'x\n' >"$dir/a.sh"
-	git -C "$dir" add -A
-	git -C "$dir" commit -qm 'init'
-	printf 'y\n' >>"$dir/a.sh"
+	printf 'x\n' >"$repo/a.sh"
+	git -C "$repo" add -A
+	git -C "$repo" commit -qm 'init'
+	printf 'y\n' >>"$repo/a.sh"
 
-	out=$(in_repo "$dir" check --fix)
+	out=$(in_repo check --fix)
 	want_exit 'check/--fix exits 0' 0 $?
-	staged=$(git -C "$dir" diff --cached --name-only)
+	staged=$(git -C "$repo" diff --cached --name-only)
 	want_not_in 'check/--fix stages nothing' 'a.sh' "$staged"
 }
 
 case_check_grades_stdin() {
-	local dir out
-	dir=$(mkrepo <<'CONF') || return
+	local out
+	mkrepo <<'CONF' || return
 schema = 1
 types  = feat
 CONF
-	out=$(cd "$dir" &&
+	out=$(cd "$repo" &&
 		printf 'nope\n' |
-		GITHOOKS_CONF=$dir/hooks.conf "$engine" check - 2>&1)
+		GITHOOKS_CONF=$repo/hooks.conf "$engine" check - 2>&1)
 	want_exit 'check/grades a message on stdin' 1 $?
 	want_in 'check/stdin rejection says the shape' 'the shape' "$out"
 }
 
 case_symlink_skipped() {
-	local dir out
-	dir=$(mkrepo <<'CONF') || return
+	local out
+	mkrepo <<'CONF' || return
 schema = 1
 
 [group shell]
 match = *.sh
 run   = printf path:%s\n
 CONF
-	printf 'x\n' >"$dir/a.sh"
-	ln -s a.sh "$dir/link.sh"
-	git -C "$dir" add -A
+	printf 'x\n' >"$repo/a.sh"
+	ln -s a.sh "$repo/link.sh"
+	git -C "$repo" add -A
 
-	out=$(in_repo "$dir" pre-commit)
+	out=$(in_repo pre-commit)
 	want_in 'pre-commit/a real file reaches the lane' 'path:a.sh' "$out"
 	want_not_in 'pre-commit/a symlink never reaches a lane' \
 		'path:link.sh' "$out"
 }
 
 case_runs_from_a_subdir() {
-	local dir out
-	dir=$(mkrepo <<'CONF') || return
+	local out
+	mkrepo <<'CONF' || return
 schema = 1
 
 [group shell]
 match = *.sh
 run   = printf path:%s\n
 CONF
-	mkdir -p "$dir/deep"
-	printf 'x\n' >"$dir/deep/a.sh"
-	git -C "$dir" add -A
+	mkdir -p "$repo/deep"
+	printf 'x\n' >"$repo/deep/a.sh"
+	git -C "$repo" add -A
 
-	out=$(cd "$dir/deep" && GITHOOKS_CONF=$dir/hooks.conf "$engine" check 2>&1)
+	out=$(cd "$repo/deep" && GITHOOKS_CONF=$repo/hooks.conf "$engine" check 2>&1)
 	want_in 'check/paths stay relative to the repo root' \
 		'path:deep/a.sh' "$out"
 }
@@ -416,34 +415,34 @@ CONF
 # ------------------------------------------------------------------ config
 
 case_conf_errors() {
-	local dir out
-	dir=$(mkrepo <<'CONF') || return
+	local out
+	mkrepo <<'CONF' || return
 schema = 1
 subjet_max = 72
 CONF
-	out=$(in_repo "$dir" check)
+	out=$(in_repo check)
 	want_exit 'conf/unknown key exits 2' 2 $?
 	want_in 'conf/unknown key names the key' 'subjet_max' "$out"
 
-	dir=$(mkrepo <<'CONF') || return
+	mkrepo <<'CONF' || return
 schema      = 1
 subject_max = wide
 CONF
-	out=$(in_repo "$dir" check)
+	out=$(in_repo check)
 	want_exit 'conf/bad value exits 2' 2 $?
 
-	dir=$(mkrepo <<'CONF') || return
+	mkrepo <<'CONF' || return
 schema = 99
 CONF
-	out=$(in_repo "$dir" check)
+	out=$(in_repo check)
 	want_exit 'conf/unknown schema exits 2' 2 $?
 	want_in 'conf/unknown schema names the stale side' 'stale' "$out"
 
-	dir=$(mkrepo <<'CONF') || return
+	mkrepo <<'CONF' || return
 [group shell
 run = true
 CONF
-	out=$(in_repo "$dir" check)
+	out=$(in_repo check)
 	want_exit 'conf/malformed group header exits 2' 2 $?
 }
 
