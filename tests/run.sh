@@ -333,6 +333,37 @@ FIX
 	want_in 'pre-commit/--fix re-stages the result' 'fixed' "$staged"
 }
 
+# A fixer that rewrote the file and then failed has left something nobody
+# asked for. Staging it makes the index differ from what you staged, on the
+# one path where the commit is refused anyway.
+case_fix_failure_never_stages() {
+	local out staged
+	mkrepo <<'CONF' || return
+schema = 1
+
+[group shell]
+match = *.sh
+run   = true
+fix   = tests/fixtures/halfway.sh
+CONF
+	mkdir -p "$repo/tests/fixtures"
+	cat >"$repo/tests/fixtures/halfway.sh" <<'FIX'
+#!/usr/bin/env bash
+printf 'half\n' >"$1"
+exit 3
+FIX
+	chmod +x "$repo/tests/fixtures/halfway.sh"
+	printf 'whole\n' >"$repo/a.sh"
+	git -C "$repo" add a.sh
+
+	out=$(in_repo pre-commit --fix)
+	want_exit 'pre-commit/--fix with a failing fixer exits 1' 1 $?
+	staged=$(git -C "$repo" show ':a.sh')
+	want_in 'pre-commit/a failed fixer leaves the index alone' \
+		'whole' "$staged"
+	want_not_in 'pre-commit/a failed fixer stages nothing' 'half' "$staged"
+}
+
 case_fix_refuses_partial() {
 	local out
 	mkrepo <<'CONF' || return
@@ -580,6 +611,7 @@ case_missing_tool
 case_deleted_path
 case_scope_tree
 case_fix_and_restage
+case_fix_failure_never_stages
 case_fix_refuses_partial
 case_check_sees_unstaged
 case_check_sees_untracked

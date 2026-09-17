@@ -634,9 +634,11 @@ run_group() {
 		fi
 	done <<<"$commands"
 
-	# No paths means a pathless tree lane: `git add --` would only print
-	# git's own "nothing specified" hint at someone who asked for nothing.
-	if $fix && $restage && ((${#matched[@]} > 0)) && [[ -n ${g_fix[$group]} ]]; then
+	# Only on success. No paths means a pathless tree lane, where `git add --`
+	# would print git's own "nothing specified" hint at someone who asked for
+	# nothing; and a fixer that failed halfway left something nobody staged.
+	if $fix && $restage && ((failed == 0)) && ((${#matched[@]} > 0)) &&
+		[[ -n ${g_fix[$group]} ]]; then
 		git add -- "${matched[@]}" || failed=1
 	fi
 
