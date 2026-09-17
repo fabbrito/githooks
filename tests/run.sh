@@ -340,6 +340,31 @@ CONF
 	want_in 'check/judges working changes, staged or not' 'path:a.sh' "$out"
 }
 
+case_check_sees_untracked() {
+	local out
+	mkrepo <<'CONF' || return
+schema = 1
+
+[group shell]
+match = *.sh
+run   = printf path:%s\n
+CONF
+	printf 'ignored.sh\n' >"$repo/.gitignore"
+	printf 'x\n' >"$repo/a.sh"
+	git -C "$repo" add -A
+	git -C "$repo" commit -qm 'init'
+	printf 'y\n' >"$repo/new.sh"
+	printf 'z\n' >"$repo/ignored.sh"
+
+	out=$(in_repo check)
+	want_in 'check/judges an untracked file' 'path:new.sh' "$out"
+	want_not_in 'check/an ignored file stays out' 'path:ignored.sh' "$out"
+
+	out=$(in_repo pre-commit)
+	want_not_in 'pre-commit/an untracked file is not staged' \
+		'path:new.sh' "$out"
+}
+
 case_check_never_stages() {
 	local out staged
 	mkrepo <<'CONF' || return
@@ -526,6 +551,7 @@ case_scope_tree
 case_fix_and_restage
 case_fix_refuses_partial
 case_check_sees_unstaged
+case_check_sees_untracked
 case_check_never_stages
 case_check_grades_stdin
 case_symlink_skipped

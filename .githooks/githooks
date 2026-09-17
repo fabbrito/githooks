@@ -273,15 +273,21 @@ read_staged() {
 	read_paths files true diff --cached --name-only --diff-filter=ACMR -z
 }
 
-# What `check` judges: tracked files that differ from HEAD, staged or not.
-# `check` answers "is what I am about to commit acceptable", and before
-# `git add` that is the working tree.
+# What `check` judges: everything the next `git add -A` would take - tracked
+# files that differ from HEAD, plus untracked ones git is not ignoring.
+# `check` answers "is what I am about to commit acceptable", and a brand-new
+# file is exactly that question. The two sets are disjoint, so no dedup.
 read_worktree() {
+	local untracked=()
+
 	if has_head; then
 		read_paths files true diff --name-only --diff-filter=ACMR -z HEAD
 	else
 		read_staged
 	fi
+
+	read_paths untracked true ls-files --others --exclude-standard -z
+	files+=("${untracked[@]}")
 }
 
 read_unstaged() {

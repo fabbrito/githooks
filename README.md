@@ -67,13 +67,13 @@ fresh clone is covered without anyone remembering. A node repo can put it in `pr
 
 ## Commands
 
-| Command                              | Does                                                                                                           |
-| ------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
-| `githooks commit-msg <file>`         | Grade the message at `$1`. Called by the shim.                                                                 |
-| `githooks pre-commit [--fix]`        | Run lanes over the staged set. Called by the shim.                                                             |
-| `githooks check [--fix] [<file>\|-]` | The gate for humans and agents: lanes over working changes, plus a message when one is given. `-` reads stdin. |
-| `githooks version`                   | Print the version and schema.                                                                                  |
-| `githooks help`, `-h`, `--help`      | Print the command list.                                                                                        |
+| Command                              | Does                                                                                                                                     |
+| ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `githooks commit-msg <file>`         | Grade the message at `$1`. Called by the shim.                                                                                           |
+| `githooks pre-commit [--fix]`        | Run lanes over the staged set. Called by the shim.                                                                                       |
+| `githooks check [--fix] [<file>\|-]` | The gate for humans and agents: lanes over working changes, untracked files included, plus a message when one is given. `-` reads stdin. |
+| `githooks version`                   | Print the version and schema.                                                                                                            |
+| `githooks help`, `-h`, `--help`      | Print the command list.                                                                                                                  |
 
 Exit codes: `0` ok, `1` rejected or a lane failed, `2` usage, config, or a broken environment —
 including git itself failing. `2` is distinct on purpose: none of those judged your commit, and a
