@@ -1,0 +1,8 @@
+# Fixtures are inputs. A formatter rewrapping one silently changes what the
+# test asserts.
+tests/
+
+.tmp/
+
+# A symlink to AGENTS.md; prettier refuses to follow one.
+CLAUDE.md

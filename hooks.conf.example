@@ -1,0 +1,81 @@
+# hooks.conf - the whole policy for one repo. Copy this to .githooks/, delete
+# what you do not need, and keep it committed.
+#
+# Format: INI-lite. `#` comments, blank lines ignored, `key = value`. Values
+# split on whitespace; `run` and `fix` take the rest of the line verbatim.
+# Every key below has the default shown, so a three-line config is valid.
+#
+# Unknown key, bad value, unknown schema: exit 2. Never exit 1 - a broken
+# config must not read as a rejected commit.
+
+# The config format this file is written against. Absent means 1.
+schema = 1
+
+# ------------------------------------------------------------ commit policy
+
+# The `type` in `type(scope): subject`.
+types = feat fix refactor chore style docs build perf
+
+# Ceiling for the whole subject line, and for one body bullet.
+subject_max = 72
+body_cols   = 80
+
+# How many bullets a body may carry. Keep the why, drop the rest.
+bullet_max = 2
+
+# The `scope` in `type(scope): subject`. Scope is optional in a message, but
+# when present it must be on this list.
+#
+# scope_fixed: names that are not directories.
+# scope_root:  a glob, once per line. Every directory it finds contributes its
+#              basename. An unmatched glob is dropped, not an error.
+scope_fixed = repo docs tools setup hooks make
+# scope_root = dotfiles/common/*/
+# scope_root = installers/*/
+
+# Trailers are an allowlist, and it is exactly these two lists. A key in
+# neither is rejected. Once a trailer appears, only trailers may follow.
+#
+# trailer_person:    Name <email>
+# trailer_reference: one non-space token
+trailer_person    = Co-Authored-By Signed-off-by Reviewed-by
+trailer_reference = Refs Closes Fixes
+
+# ------------------------------------------------------------------- lanes
+#
+# A group runs when any changed path matches one of its `match` globs. Groups
+# run in order, every matching group runs even after one fails, and the status
+# aggregates - one pass shows you everything.
+#
+#   match   = shell case globs, so `*` crosses `/`. Absent means always run.
+#   scope   = staged | tree. `staged` appends the matched paths to each
+#             command; `tree` runs the command as written.
+#   run     = a command, once per line. Split on whitespace: no quoting. If
+#             you need quoting, call a script.
+#   fix     = replaces `run` under --fix, and re-stages the matched paths
+#             (pre-commit only - `check --fix` formats but never stages).
+#   require = true makes a missing command fail. Default false: it warns and
+#             skips, because a machine without shfmt is usually a machine that
+#             has not finished setting up.
+
+# [group shell]
+# match   = *.sh .githooks/githooks .githooks/commit-msg .githooks/pre-commit
+# scope   = staged
+# require = false
+# run     = shfmt -i 0 -ci -d
+# fix     = shfmt -i 0 -ci -w
+# run     = shellcheck -x
+
+# [group docs]
+# match = *.md *.json *.yml *.yaml
+# scope = staged
+# run   = npx --yes prettier@3.9.6 --check
+# fix   = npx --yes prettier@3.9.6 --write
+
+# A lane the engine cannot express - a vault guard, a secret scan - is a
+# script you call from here, or a native pre-commit that runs the engine and
+# then its own guard. The config never grows a conditional.
+# [group secrets]
+# scope   = tree
+# require = true
+# run     = tools/no-secrets.sh
