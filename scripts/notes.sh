@@ -48,10 +48,6 @@ for section in "${sections[@]}"; do
 	printf '### %s\n\n%s' "$section" "${lines[$section]}"
 done
 
-# The repo, never a raw file URL: it stays true whether this repo is private
-# or public, and how the engine lands in .githooks is the consumer's call.
-printf '\nVendor it: https://github.com/fabbrito/githooks\n'
-
 if [[ -n $prev ]]; then
 	slug=$(git remote get-url origin) || die 'no origin'
 	slug=${slug%.git}
