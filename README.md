@@ -3,9 +3,9 @@
 One git-hook engine, vendored like a C dependency: the same file in every repo, all variation in a
 committed `hooks.conf`.
 
-It does two things. It grades commit messages, and it runs lanes over the files you are about to
-commit. Every rejection says what is wrong **and what to write instead**, because the committer is
-usually an agent, and prose rules in `AGENTS.md` drift while a tool that rejects does not.
+It grades commit messages and runs lanes over the files you are about to commit. Every rejection
+says what is wrong **and what to write instead**: the committer is usually an agent, and prose rules
+in `AGENTS.md` drift while a tool that rejects does not.
 
 ```
 $ git commit -m 'Add the dispatcher.'
@@ -24,9 +24,9 @@ the shape:
 
 ## Vendor it
 
-Take `bin/githooks` from [the repo](https://github.com/fabbrito/githooks), at the tag you want, and
+Take `bin/githooks` from [the repo](https://github.com/fabbrito/githooks) at the tag you want and
 put it in `.githooks/githooks`, executable. How you fetch it is yours: `curl`, `gh`, a copy out of a
-local clone, whatever your repo already does.
+local clone.
 
 Then `hooks.conf` beside it — start from `hooks.conf.example` — and two shims, identical in every
 repo:
@@ -41,8 +41,7 @@ exec "$(dirname "$0")/githooks" commit-msg "$@"
 
 `.githooks/pre-commit` is the same line with `pre-commit "$@"`. Commit all four files.
 
-Updating is the same thing again at a newer tag. There is no lock file and no self-update: see
-[Not here](#not-here).
+Updating is the same again at a newer tag. No lock file, no self-update: see [Not here](#not-here).
 
 ## Enable it
 
@@ -52,7 +51,7 @@ Hooks do not travel with a clone, so something has to run this once:
 git config core.hooksPath .githooks
 ```
 
-That is your repo's call, not the engine's. Pick whatever already exists:
+Your repo's call, not the engine's. Pick whatever already exists:
 
 ```make
 hooks: ## enable .githooks for this clone
@@ -63,7 +62,7 @@ check: ## commit gate - run before committing
 ```
 
 Make `hooks` a prerequisite of the target people already run (`deps`, `bootstrap`, `test`) and a
-fresh clone is covered without anyone remembering. A node repo can put it in `prepare`.
+fresh clone is covered without anyone remembering. A node repo uses `prepare`.
 
 ## Commands
 
@@ -75,9 +74,9 @@ fresh clone is covered without anyone remembering. A node repo can put it in `pr
 | `githooks version`                   | Print the version and schema.                                                                                                            |
 | `githooks help`, `-h`, `--help`      | Print the command list.                                                                                                                  |
 
-Exit codes: `0` ok, `1` rejected or a lane failed, `2` usage, config, or a broken environment —
+Exit codes: `0` ok, `1` rejected or a lane failed, `2` usage, config, or a broken environment,
 including git itself failing. `2` is distinct on purpose: none of those judged your commit, and a
-`1` invites `--no-verify` as the fix when the real problem is the machine.
+`1` invites `--no-verify` when the real problem is the machine.
 
 `GITHOOKS_SKIP=1` passes anything. `GITHOOKS_CONF=<file>` points at another config, which is how the
 tests run.
@@ -95,12 +94,11 @@ tests run.
   Person keys take `Name <email>`, reference keys take one token. Once a trailer appears, only
   trailers may follow.
 - **Scopes** — `scope_fixed`, plus the basename of every directory a `scope_root` glob finds. The
-  full list is printed only when the rejection is an unknown scope; the rest of the time it would be
-  noise.
+  full list prints only when the rejection is an unknown scope.
 
-Not graded at all: anything git wrote (`Merge `, `Revert `, `fixup!`, `squash!`, `amend!`), and
-**every message during a rebase**. A rebase replays messages it did not author, and failing them
-would make this tool the reason you cannot rebase.
+Not graded: anything git wrote (`Merge `, `Revert `, `fixup!`, `squash!`, `amend!`), and **every
+message during a rebase** — a rebase replays messages it did not author, and failing them would make
+this tool the reason you cannot rebase.
 
 ## Lanes
 
@@ -123,21 +121,19 @@ run     = shellcheck -x
   handing one to a formatter fails for the wrong reason.
 - An empty staged set (`commit --amend --no-edit`) runs no `staged` lane — there is nothing to hand
   it. Every `tree` lane still runs, `match` or not: a `match` filters what changed and nothing did,
-  while the lane's invariant does not depend on what changed. That is the lane you least want going
-  quiet.
+  while the invariant does not. That is the lane you least want going quiet.
 - A missing command warns and skips. `require = true` makes it fail instead.
 - Commands are exec'd as written, split on whitespace: no quoting, no redirection, no pipeline, no
   glob expansion, and the lane inherits the caller's stdin, stdout and stderr. Needing any of those
   means a script the lane calls.
 
-`--fix` swaps `run` for `fix`. Under `pre-commit --fix` the matched paths are re-staged, which is
-the only thing this tool ever mutates — and it **refuses** when a matched file has both staged and
-unstaged changes, rather than swallowing the half you left out. `check --fix` formats but never
-stages, so it has nothing to swallow and never refuses: those files were never staged, and staging
-them would make a decision you have not made.
+`--fix` swaps `run` for `fix`. Under `pre-commit --fix` the matched paths are re-staged — the only
+thing this tool mutates — and it **refuses** when a matched file has both staged and unstaged
+changes, rather than swallowing the half you left out. `check --fix` formats but never stages, so it
+never refuses: staging those files would make a decision you have not made.
 
-Anything the config cannot express — a vault guard, a secret scan — is a script the config calls, or
-a native `pre-commit` that runs the engine and then its own guard. The format does not grow
+Anything the config cannot express — a vault guard, a secret scan — is a script it calls, or a
+native `pre-commit` that runs the engine and then its own guard. The format does not grow
 conditionals.
 
 ## Config
@@ -151,12 +147,12 @@ a typo rather than a future feature, so that is exit 2 as well.
 ## Not here
 
 No lock file, no integrity check, no self-update, no staleness sweep, no CI. Every copy is bumped by
-hand, and nothing notices a repo sitting on an old engine. That is a deliberate cut, not an
-oversight: a lock would only catch hand-edits, and a stale-but-intact copy passes any check that
-does not go to the network. It comes back when a bump actually hurts.
+hand, and nothing notices a repo sitting on an old engine. Deliberate: a lock would only catch
+hand-edits, and a stale-but-intact copy passes any check that does not go to the network. It comes
+back when a bump actually hurts.
 
-Also not here, and not planned: secret scanning, parallel lanes, caching, per-language adapters, a
-hook installer. Two repos needing the middle three is the signal to adopt
+Also not planned: secret scanning, parallel lanes, caching, per-language adapters, a hook installer.
+Two repos needing the middle three is the signal to adopt
 [lefthook](https://github.com/evilmartians/lefthook) instead.
 
 ## Hacking
@@ -168,12 +164,12 @@ make check      # the staging gate, via the vendored copy
 make fmt        # the same lanes, writing
 ```
 
-`bin/githooks` is the source; `.githooks/githooks` is this repo's vendored copy of it, so the repo
-is its own first consumer. `make check` and `make fmt` run the copy, and both refresh it first — if
-they ever disagree with `bin/`, that is the bug this layout exists to surface.
+`bin/githooks` is the source; `.githooks/githooks` is this repo's vendored copy, so the repo is its
+own first consumer. `make check` and `make fmt` run the copy and refresh it first — if the two ever
+disagree, that is the bug this layout exists to surface.
 
 Tests are plain bash: `tests/commit-msg/<name>.msg` next to `<name>.expect` holding the expected
-exit code, and dispatcher cases that build throwaway repos in `tests/run.sh`. A rule is written once
+exit code, and dispatcher cases building throwaway repos in `tests/run.sh`. A rule is written once
 and proven once.
 
 MIT.
