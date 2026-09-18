@@ -126,6 +126,9 @@ run     = shellcheck -x
 - Commands are exec'd as written, split on whitespace: no quoting, no redirection, no pipeline, no
   glob expansion, and the lane inherits the caller's stdin, stdout and stderr. Needing any of those
   means a script the lane calls.
+- Those inherited descriptors are git's, or your harness's: no terminal, and sometimes non-blocking.
+  A tool that refuses them is your script's problem to solve — open fresh handles in the wrapper.
+  The engine hands its lanes what it was given and does not launder it.
 
 `--fix` swaps `run` for `fix`. Under `pre-commit --fix` the matched paths are re-staged — the only
 thing this tool mutates — and it **refuses** when a matched file has both staged and unstaged
