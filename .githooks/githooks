@@ -273,15 +273,18 @@ read_staged() {
 	read_paths files true diff --cached --name-only --diff-filter=ACMR -z
 }
 
-# Deletions, kept apart. A `staged` lane cannot take one as an argument -
-# there is no file to read - but a `tree` lane's `match` is a trigger, not a
-# file list, and removing a role is exactly when a whole-tree check earns its
-# keep. No `keep_path`: the path is gone, so it would filter every one.
+# Deletions, kept apart. A `staged` lane cannot take one as an argument, but
+# a `tree` lane's `match` is a trigger, not a file list, and a file leaving
+# is when its invariant is most likely broken. No `keep_path`: the path is
+# gone, so it would filter every one out.
 read_deleted() {
 	read_paths deleted false diff --cached --name-only --diff-filter=D -z
 }
 
+# The same for `check`, which judges the worktree against HEAD. No HEAD, no
+# deletions to find - and `git diff HEAD` would fail.
 read_deleted_worktree() {
+	deleted=()
 	has_head || return 0
 	read_paths deleted false diff --name-only --diff-filter=D -z HEAD
 }
@@ -620,9 +623,6 @@ run_group() {
 		for path in "${files[@]}"; do
 			path_matches "$path" "${patterns[@]}" && matched+=("$path")
 		done
-		# A deletion triggers a tree lane without being handed to it: the
-		# lane re-reads the tree anyway, and a file leaving is a change to
-		# the tree it holds its invariant over.
 		if ((${#matched[@]} == 0)) && [[ $scope == tree ]]; then
 			for path in "${deleted[@]}"; do
 				path_matches "$path" "${patterns[@]}" && triggered=true && break
