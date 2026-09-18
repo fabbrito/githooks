@@ -51,13 +51,19 @@ trailer_reference = Refs Closes Fixes
 #   match   = shell case globs, so `*` crosses `/`. Absent means always run.
 #   scope   = staged | tree. `staged` appends the matched paths to each
 #             command; `tree` runs the command as written.
-#   run     = a command, once per line. Split on whitespace: no quoting. If
-#             you need quoting, call a script.
+#   run     = a command, once per line, exec'd as written and split on
+#             whitespace: no quoting, no redirection, no pipeline, no globs,
+#             and it inherits the caller's stdin, stdout and stderr. Needing
+#             any of those means a script.
 #   fix     = replaces `run` under --fix, and re-stages the matched paths
 #             (pre-commit only - `check --fix` formats but never stages).
 #   require = true makes a missing command fail. Default false: it warns and
 #             skips, because a machine without shfmt is usually a machine that
 #             has not finished setting up.
+#
+# A formatter's own config - .prettierrc.json, .editorconfig - redefines
+# "formatted" for every file it reaches, not just the changed ones. Give it a
+# `tree` lane, or the commit that widens it passes and the next one pays.
 
 # [group shell]
 # match   = *.sh .githooks/githooks .githooks/commit-msg .githooks/pre-commit

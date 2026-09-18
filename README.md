@@ -126,7 +126,9 @@ run     = shellcheck -x
   while the lane's invariant does not depend on what changed. That is the lane you least want going
   quiet.
 - A missing command warns and skips. `require = true` makes it fail instead.
-- Commands are split on whitespace, with no quoting. If you need quoting, call a script.
+- Commands are exec'd as written, split on whitespace: no quoting, no redirection, no pipeline, no
+  glob expansion, and the lane inherits the caller's stdin, stdout and stderr. Needing any of those
+  means a script the lane calls.
 
 `--fix` swaps `run` for `fix`. Under `pre-commit --fix` the matched paths are re-staged, which is
 the only thing this tool ever mutates — and it **refuses** when a matched file has both staged and
