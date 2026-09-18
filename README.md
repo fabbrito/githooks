@@ -118,7 +118,8 @@ run     = shellcheck -x
 - Groups run in order, **every** matching group runs even after one fails, and the status aggregates
   — one pass shows you everything to fix.
 - The staged set never includes deletions or symlinks: neither has content a lane can read, and
-  handing one to a formatter fails for the wrong reason.
+  handing one to a formatter fails for the wrong reason. A deletion still triggers a matched `tree`
+  lane, which takes no paths anyway — removing a file is when its invariant is most likely broken.
 - An empty staged set (`commit --amend --no-edit`) runs no `staged` lane — there is nothing to hand
   it. Every `tree` lane still runs, `match` or not: a `match` filters what changed and nothing did,
   while the invariant does not. That is the lane you least want going quiet.

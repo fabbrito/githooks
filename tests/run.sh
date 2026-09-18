@@ -239,6 +239,46 @@ case_tree_match_filters() {
 		'narrow-ran' "$out"
 }
 
+# A deletion is not in the changed set, so it cannot reach a lane as an
+# argument - but it still changed the tree. A tree lane's `match` is a
+# trigger, and removing a file is when its invariant is most likely broken.
+# The unmatched edit is the point: without it the set is empty and the lane
+# would run for the other reason.
+case_tree_match_deletion() {
+	local out
+	mkrepo <<-'CONF' || return
+		schema = 1
+
+		[group narrow]
+		match = *.rs
+		scope = tree
+		run   = printf narrow-ran\n
+
+		[group paths]
+		match = *.rs
+		scope = staged
+		run   = printf path:%s\n
+	CONF
+	printf 'x\n' >"$repo/a.rs"
+	printf 'doc\n' >"$repo/README.md"
+	git -C "$repo" add -A
+	git -C "$repo" commit -qm 'init'
+	git -C "$repo" rm -q a.rs
+	printf 'more\n' >>"$repo/README.md"
+
+	out=$(in_repo check)
+	want_in 'check/a deletion triggers a matched tree lane' \
+		'narrow-ran' "$out"
+
+	git -C "$repo" add -A
+	out=$(in_repo pre-commit)
+	want_exit 'pre-commit/a deletion exits 0' 0 $?
+	want_in 'pre-commit/a deletion triggers a matched tree lane' \
+		'narrow-ran' "$out"
+	want_not_in 'pre-commit/a deletion never reaches a staged lane' \
+		'path:a.rs' "$out"
+}
+
 case_match_and_paths() {
 	local out
 	mkrepo <<-'CONF' || return
@@ -650,6 +690,7 @@ run_commit_msg_output
 case_empty_staged
 case_check_clean_tree
 case_tree_match_filters
+case_tree_match_deletion
 case_match_and_paths
 case_aggregate
 case_missing_tool

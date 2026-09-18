@@ -49,6 +49,8 @@ trailer_reference = Refs Closes Fixes
 # aggregates - one pass shows you everything.
 #
 #   match   = shell case globs, so `*` crosses `/`. Absent means always run.
+#             A deleted path triggers a `tree` lane but never reaches a
+#             `staged` one: there is no file left to hand it.
 #   scope   = staged | tree. `staged` appends the matched paths to each
 #             command; `tree` runs the command as written.
 #   run     = a command, once per line, exec'd as written and split on

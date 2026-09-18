@@ -273,6 +273,19 @@ read_staged() {
 	read_paths files true diff --cached --name-only --diff-filter=ACMR -z
 }
 
+# Deletions, kept apart. A `staged` lane cannot take one as an argument -
+# there is no file to read - but a `tree` lane's `match` is a trigger, not a
+# file list, and removing a role is exactly when a whole-tree check earns its
+# keep. No `keep_path`: the path is gone, so it would filter every one.
+read_deleted() {
+	read_paths deleted false diff --cached --name-only --diff-filter=D -z
+}
+
+read_deleted_worktree() {
+	has_head || return 0
+	read_paths deleted false diff --name-only --diff-filter=D -z HEAD
+}
+
 # What `check` judges: everything the next `git add -A` would take - tracked
 # files that differ from HEAD, plus untracked ones git is not ignoring.
 # `check` answers "is what I am about to commit acceptable", and a brand-new
@@ -597,7 +610,7 @@ run_group() {
 	local group=$1 fix=$2
 	local patterns=() matched=() path line
 	local scope=${g_scope[$group]}
-	local commands
+	local commands triggered=false
 
 	read -r -a patterns <<<"${g_match[$group]}"
 
@@ -607,9 +620,17 @@ run_group() {
 		for path in "${files[@]}"; do
 			path_matches "$path" "${patterns[@]}" && matched+=("$path")
 		done
+		# A deletion triggers a tree lane without being handed to it: the
+		# lane re-reads the tree anyway, and a file leaving is a change to
+		# the tree it holds its invariant over.
+		if ((${#matched[@]} == 0)) && [[ $scope == tree ]]; then
+			for path in "${deleted[@]}"; do
+				path_matches "$path" "${patterns[@]}" && triggered=true && break
+			done
+		fi
 		# `match` filters what changed; it cannot select against an empty
 		# set. Nothing changed falls through to the scope rule below.
-		((${#matched[@]} == 0)) && ((${#files[@]} > 0)) && return 0
+		((${#matched[@]} == 0)) && ! $triggered && ((${#files[@]} > 0)) && return 0
 	fi
 
 	# A staged lane takes its paths as arguments, so handing it none makes it
@@ -697,6 +718,7 @@ cmd_pre_commit() {
 
 	restage=true
 	read_staged
+	read_deleted
 	read_unstaged
 	dispatch "$fix"
 }
@@ -720,6 +742,7 @@ cmd_check() {
 	# would commit a decision the user has not made.
 	restage=false
 	read_worktree
+	read_deleted_worktree
 	unstaged=()
 	dispatch "$fix"
 
@@ -782,6 +805,7 @@ main() {
 }
 
 files=()
+deleted=()
 unstaged=()
 lines=()
 scopes=()
