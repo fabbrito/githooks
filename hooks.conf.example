@@ -84,6 +84,15 @@ trailer_reference = Refs Closes Fixes
 # run   = npx --yes prettier@3.9.8 --check
 # fix   = npx --yes prettier@3.9.8 --write
 
+# The config lane the paragraph above asks for. `.` because the command is
+# exec'd, not globbed - prettier reads .prettierignore itself.
+# [group docs-config]
+# match   = .prettierrc.json .prettierignore
+# scope   = tree
+# require = true
+# run     = npx --yes prettier@3.9.8 --check .
+# fix     = npx --yes prettier@3.9.8 --write .
+
 # A lane the engine cannot express - a vault guard, a secret scan - is a
 # script you call from here, or a native pre-commit that runs the engine and
 # then its own guard. The config never grows a conditional.
