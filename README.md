@@ -144,6 +144,9 @@ conditionals.
 
 `hooks.conf.example` is the schema document: every key, its default, and what it does.
 
+`hooks.conf` needs no lane of its own. It is parsed on every run, so a typo is exit 2 before any
+lane starts — checked harder than a formatter would.
+
 `schema = N` is the one cross-version guarantee. Absent means 1. A schema this engine does not know
 is exit 2, naming both numbers and which side is stale. Inside a schema it knows, an unknown key is
 a typo rather than a future feature, so that is exit 2 as well.
