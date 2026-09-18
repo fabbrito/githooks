@@ -67,11 +67,14 @@ trailer_reference = Refs Closes Fixes
 # fix     = shfmt -i 0 -ci -w
 # run     = shellcheck -x
 
+# Pinned so an upstream release cannot turn your tree red. Copy the current
+# version, not this one. npx, not bunx - bun leaves stdio non-blocking and
+# downstream tools then misbehave.
 # [group docs]
 # match = *.md *.json *.yml *.yaml
 # scope = staged
-# run   = npx --yes prettier@3.9.6 --check
-# fix   = npx --yes prettier@3.9.6 --write
+# run   = npx --yes prettier@3.9.8 --check
+# fix   = npx --yes prettier@3.9.8 --write
 
 # A lane the engine cannot express - a vault guard, a secret scan - is a
 # script you call from here, or a native pre-commit that runs the engine and
