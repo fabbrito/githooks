@@ -123,6 +123,9 @@ run     = shellcheck -x
 - An empty staged set (`commit --amend --no-edit`) runs no `staged` lane — there is nothing to hand
   it. Every `tree` lane still runs, `match` or not: a `match` filters what changed and nothing did,
   while the invariant does not. That is the lane you least want going quiet.
+- `run`, `fix` and `scope_root` take a line each and accumulate. Every other key is written once,
+  and a second line is exit 2 naming the first — a replaced `match` narrows a lane into silence,
+  which nothing downstream can catch.
 - A missing command warns and skips. `require = true` makes it fail instead.
 - Commands are exec'd as written, split on whitespace: no quoting, no redirection, no pipeline, no
   glob expansion, and the lane inherits the caller's stdin, stdout and stderr. Needing any of those

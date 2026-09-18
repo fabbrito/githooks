@@ -98,6 +98,12 @@ is_command_key() {
 	[[ $1 == run || $1 == fix ]]
 }
 
+# Keys that take a line each. Every other key is written once: a second line
+# replaces, and a replaced `match` narrows a lane into silence.
+accumulates() {
+	[[ $1 == run || $1 == fix || $1 == scope_root ]]
+}
+
 # Append to a newline-joined accumulator.
 append() {
 	local -n ref=$1
@@ -111,6 +117,9 @@ append() {
 parse_conf() {
 	local file=$1
 	local line key value group='' lineno=0
+	# One entry per key written, keyed by group so two groups may each
+	# write their own. Group names are unique already.
+	local -A seen=()
 
 	while IFS= read -r line || [[ -n $line ]]; do
 		((lineno++))
@@ -147,6 +156,17 @@ parse_conf() {
 			value=${value%%[[:space:]]#*}
 		fi
 		value=${value%"${value##*[![:space:]]}"}
+
+		if ! accumulates "$key"; then
+			local where=$group$'\x1f'$key
+			if [[ -n ${seen[$where]:-} ]]; then
+				local dup="$file:$lineno: duplicate key: $key,"
+				dup+=" first at line ${seen[$where]}"
+				die "$dup - write one $key line;" \
+					"only run, fix and scope_root accumulate"
+			fi
+			seen[$where]=$lineno
+		fi
 
 		# conf_defaults already holds every key there is, so "has a
 		# default" is the whole validator - no second list to drift.

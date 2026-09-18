@@ -680,6 +680,55 @@ case_conf_errors() {
 	CONF
 	out=$(in_repo check)
 	want_exit 'conf/malformed group header exits 2' 2 $?
+
+	# A second `match` replaced the first and the lane went quiet - the one
+	# config typo nothing downstream can catch.
+	mkrepo <<-'CONF' || return
+		schema = 1
+
+		[group two]
+		match = *.aaa
+		match = *.bbb
+		scope = staged
+		run   = true
+	CONF
+	out=$(in_repo check)
+	want_exit 'conf/a duplicate key exits 2' 2 $?
+	want_in 'conf/a duplicate key names both lines' 'first at line 4' "$out"
+	want_in 'conf/a duplicate key says what to write' \
+		'write one match line' "$out"
+
+	mkrepo <<-'CONF' || return
+		schema      = 1
+		subject_max = 72
+		subject_max = 80
+	CONF
+	out=$(in_repo check)
+	want_exit 'conf/a duplicate top-level key exits 2' 2 $?
+
+	# `run` still stacks, and one key per group is per *group*: two groups
+	# each write their own. `scope_root` accumulating is the commit-msg
+	# fixture conf, which derives its scopes from two of them.
+	mkrepo <<-'CONF' || return
+		schema = 1
+
+		[group one]
+		match = *.aaa
+		scope = tree
+		run   = printf one\n
+		run   = printf two\n
+
+		[group other]
+		match = *.bbb
+		scope = tree
+		run   = printf three\n
+	CONF
+	printf 'x\n' >"$repo/f.aaa"
+	printf 'x\n' >"$repo/f.bbb"
+	out=$(in_repo check)
+	want_exit 'conf/accumulating keys still accumulate' 0 $?
+	want_in 'conf/every run line runs' 'two' "$out"
+	want_in 'conf/each group writes its own match' 'three' "$out"
 }
 
 # -------------------------------------------------------------------- main
