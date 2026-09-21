@@ -124,6 +124,13 @@ run_commit_msg_output() {
 	want_not_in 'commit-msg/bad-period stays quiet about scopes' \
 		'scopes:' "$out"
 
+	# Wrapped prose is one rejection, not one per line.
+	out=$(grade bad-prose-body)
+	want_in 'commit-msg/bad-prose-body names the run' \
+		'body is prose, not bullets (lines 3-5)' "$out"
+	want_not_in 'commit-msg/bad-prose-body rejects once' \
+		'is not a bullet' "$out"
+
 	grade bad-shape GITHOOKS_SKIP=1 >/dev/null 2>&1
 	want_exit 'commit-msg GITHOOKS_SKIP passes anything' 0 $?
 
