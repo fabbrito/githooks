@@ -340,8 +340,18 @@ read_worktree() {
 	files+=("${untracked[@]}")
 }
 
-read_unstaged() {
-	read_paths unstaged false diff --name-only --diff-filter=ACMR -z
+# Staged paths the worktree no longer matches: modified after staging, or
+# deleted from it. A staged lane reads the worktree, so these are bytes it
+# would grade that nobody staged - while the commit still ships the staged
+# blob. No --diff-filter: a deletion is the shape most likely to slip through.
+read_dirty_staged() {
+	local staged=() dirty=() path
+	read_paths staged false diff --cached --name-only --diff-filter=ACMR -z
+	read_paths dirty false diff --name-only -z
+	partial=()
+	for path in "${dirty[@]}"; do
+		in_list "$path" "${staged[@]}" && partial+=("$path")
+	done
 }
 
 # -------------------------------------------------------------- commit-msg
@@ -669,11 +679,37 @@ run_lane() {
 # fails: an agent should see all of it in a single pass.
 run_group() {
 	local group=$1 fix=$2
-	local patterns=() matched=() path line
+	local patterns=() matched=() dirty=() path line
 	local scope=${g_scope[$group]}
 	local commands triggered=false
 
 	read -r -a patterns <<<"${g_match[$group]}"
+
+	commands=${g_run[$group]}
+	if $fix && [[ -n ${g_fix[$group]} ]]; then
+		commands=${g_fix[$group]}
+	fi
+
+	# A staged lane reads the worktree. Wherever the worktree is not the index
+	# for a path it would be handed, it would grade bytes nobody staged - and
+	# the commit still ships the staged blob. Checked before the match filter:
+	# a staged path deleted from the worktree leaves `files`, so `matched`
+	# would never see it.
+	if $restage && [[ $scope == staged ]] && [[ -n $commands ]]; then
+		for path in "${partial[@]}"; do
+			if ((${#patterns[@]} == 0)); then
+				dirty+=("$path")
+			else
+				path_matches "$path" "${patterns[@]}" && dirty+=("$path")
+			fi
+		done
+		if ((${#dirty[@]} > 0)); then
+			reject "[$group] staged content is not what the worktree holds" \
+				"${dirty[@]}" \
+				'write: git add those paths, or git stash push them, then retry'
+			return 0
+		fi
+	fi
 
 	if ((${#patterns[@]} == 0)); then
 		matched=("${files[@]}")
@@ -695,12 +731,6 @@ run_group() {
 	# read stdin. A tree lane runs anyway, `match` or not: its invariant does
 	# not depend on what changed, and it must not go quiet on `--amend`.
 	((${#matched[@]} == 0)) && [[ $scope != tree ]] && return 0
-
-	commands=${g_run[$group]}
-	if $fix && [[ -n ${g_fix[$group]} ]]; then
-		commands=${g_fix[$group]}
-		refuse_partial "$group" "${matched[@]}" || return 1
-	fi
 
 	[[ -z $commands ]] && return 0
 
@@ -733,26 +763,6 @@ run_group() {
 	return 0
 }
 
-# Formatting the worktree and re-staging would swallow the half of a
-# partially staged file that was deliberately left out.
-refuse_partial() {
-	local group=$1 path
-	shift
-	$restage || return 0
-
-	local partial=()
-	for path in "$@"; do
-		in_list "$path" "${unstaged[@]}" && partial+=("$path")
-	done
-
-	((${#partial[@]} == 0)) && return 0
-
-	reject "[$group] refusing --fix: partially staged" \
-		"${partial[@]/#/  }" \
-		'write: stage the rest (git add), or stash it, then retry'
-	return 1
-}
-
 dispatch() {
 	local fix=$1 group
 
@@ -777,7 +787,7 @@ cmd_pre_commit() {
 	restage=true
 	read_staged
 	read_deleted
-	read_unstaged
+	read_dirty_staged
 	dispatch "$fix"
 }
 
@@ -801,7 +811,7 @@ cmd_check() {
 	restage=false
 	read_worktree
 	read_deleted_worktree
-	unstaged=()
+	partial=()
 	dispatch "$fix"
 
 	[[ -n $msgfile ]] && grade_message "$msgfile"
@@ -864,7 +874,7 @@ main() {
 
 files=()
 deleted=()
-unstaged=()
+partial=()
 lines=()
 scopes=()
 restage=false

@@ -481,6 +481,75 @@ case_fix_refuses_partial() {
 	want_in 'pre-commit/--fix names the partial file' 'a.sh' "$out"
 }
 
+# A staged lane reads the worktree. Editing a file after `git add` leaves the
+# index holding what will ship; the lane would grade the worktree instead.
+case_pre_commit_refuses_a_dirty_staged_path() {
+	local out
+	mkrepo <<-'CONF' || return
+		schema = 1
+
+		[group shell]
+		match = *.sh
+		run   = printf lane\n
+	CONF
+	printf 'staged\n' >"$repo/a.sh"
+	git -C "$repo" add a.sh
+	printf 'worktree\n' >"$repo/a.sh"
+
+	out=$(in_repo pre-commit)
+	want_exit 'pre-commit/a staged file changed after add exits 1' 1 $?
+	want_in 'pre-commit/a staged file changed after add says why' \
+		'not what the worktree holds' "$out"
+	want_not_in 'pre-commit/a staged file changed after add runs no lane' \
+		'lane' "$out"
+}
+
+# Deleting a staged file drops it from `files` - a lane cannot be handed a
+# path that is gone - so the staged lane never ran and the commit shipped the
+# staged blob ungraded.
+case_pre_commit_refuses_a_deleted_staged_path() {
+	local out
+	mkrepo <<-'CONF' || return
+		schema = 1
+
+		[group shell]
+		match = *.sh
+		run   = printf lane\n
+	CONF
+	printf 'staged\n' >"$repo/a.sh"
+	git -C "$repo" add a.sh
+	rm "$repo/a.sh"
+
+	out=$(in_repo pre-commit)
+	want_exit 'pre-commit/a staged file deleted after add exits 1' 1 $?
+	want_in 'pre-commit/a staged file deleted after add says why' \
+		'not what the worktree holds' "$out"
+	want_not_in 'pre-commit/a staged file deleted after add runs no lane' \
+		'lane' "$out"
+}
+
+# The refusal is per group: a dirty staged file no lane reads must not block
+# a commit whose staged files a lane does read.
+case_pre_commit_ignores_a_dirty_path_no_lane_reads() {
+	local out
+	mkrepo <<-'CONF' || return
+		schema = 1
+
+		[group shell]
+		match = *.sh
+		run   = printf lane\n
+	CONF
+	printf 'staged\n' >"$repo/a.sh"
+	printf 'staged\n' >"$repo/a.txt"
+	git -C "$repo" add a.sh a.txt
+	printf 'worktree\n' >"$repo/a.txt"
+
+	out=$(in_repo pre-commit)
+	want_exit 'pre-commit/a dirty path no lane reads exits 0' 0 $?
+	want_in 'pre-commit/a dirty path no lane reads still runs the lane' \
+		'lane' "$out"
+}
+
 case_check_sees_unstaged() {
 	local out
 	mkrepo <<-'CONF' || return
@@ -788,6 +857,9 @@ case_scope_tree
 case_fix_and_restage
 case_fix_failure_never_stages
 case_fix_refuses_partial
+case_pre_commit_refuses_a_dirty_staged_path
+case_pre_commit_refuses_a_deleted_staged_path
+case_pre_commit_ignores_a_dirty_path_no_lane_reads
 case_check_sees_unstaged
 case_check_sees_untracked
 case_check_never_stages

@@ -20,6 +20,8 @@ hand-edit it.
 - Exit 2 for usage, config, or a broken environment (git failing, no repo); 1 only for a real
   rejection. A `require = true` lane whose command is missing is a rejection (1): the policy made
   the tool mandatory, and the fix is on the machine.
+- `pre-commit` grades the index; a lane opens the worktree. Where they disagree on a path a lane
+  would read, refuse — never grade bytes the commit will not ship.
 - Aggregate: grade the whole message, run every matching group. One pass, everything to fix.
 
 ## Shell
