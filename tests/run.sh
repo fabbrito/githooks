@@ -103,14 +103,19 @@ grade() {
 }
 
 run_commit_msg() {
-	local msg want got name
+	local msg want got name out
 	for msg in tests/commit-msg/*.msg; do
 		name=${msg##*/}
 		name=${name%.msg}
 		want=$(<"tests/commit-msg/$name.expect")
-		grade "$name" >/dev/null 2>&1
+		out=$(grade "$name")
 		got=$?
 		want_exit "commit-msg/$name" "$want" "$got"
+		# A rejection may speak; a pass must not. A stray `note` on the success
+		# path would otherwise hit every commit with nothing to catch it.
+		if ((want == 0)); then
+			[[ -z $out ]] || no "commit-msg/$name passes silently" "$out"
+		fi
 	done
 }
 
