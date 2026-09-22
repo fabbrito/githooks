@@ -16,7 +16,7 @@
 # No errexit on purpose: a failing lane is data, not a reason to abort.
 set -uo pipefail
 
-VERSION='v0.3.0'
+VERSION='v0.3.1'
 SCHEMA=1
 
 prog=${0##*/}
