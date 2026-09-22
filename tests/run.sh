@@ -375,7 +375,14 @@ case_deleted_path() {
 	git -C "$repo" commit -qm 'init'
 	git -C "$repo" rm -q gone.sh
 
+	# Keep a survivor so the lane runs: a deleted path could only be visible
+	# to it as a stale argument, which is the thing under test.
+	printf 'y\n' >"$repo/kept.sh"
+	git -C "$repo" add kept.sh
+
 	out=$(in_repo pre-commit)
+	want_in 'pre-commit/a surviving path reaches the lane' \
+		'path:kept.sh' "$out"
 	want_not_in 'pre-commit/a deleted path never reaches a lane' \
 		'path:gone.sh' "$out"
 }
@@ -512,7 +519,13 @@ case_check_sees_untracked() {
 	want_in 'check/judges an untracked file' 'path:new.sh' "$out"
 	want_not_in 'check/an ignored file stays out' 'path:ignored.sh' "$out"
 
+	# Stage something so the lane runs: otherwise "new.sh is absent" proves
+	# nothing about the staged set, only that no lane ran at all.
+	printf 'y\n' >>"$repo/a.sh"
+	git -C "$repo" add a.sh
+
 	out=$(in_repo pre-commit)
+	want_in 'pre-commit/a staged file reaches the lane' 'path:a.sh' "$out"
 	want_not_in 'pre-commit/an untracked file is not staged' \
 		'path:new.sh' "$out"
 }
@@ -549,6 +562,26 @@ case_check_grades_stdin() {
 		GITHOOKS_CONF=$repo/hooks.conf "$engine" check - 2>&1)
 	want_exit 'check/grades a message on stdin' 1 $?
 	want_in 'check/stdin rejection says the shape' 'the shape' "$out"
+}
+
+# `check` runs lanes before it grades the message. A lane failure must not
+# leak into the message: the shape is the message's rejection, not the run's.
+case_check_message_after_a_failed_lane() {
+	local out
+	mkrepo <<-'CONF' || return
+		schema = 1
+		types  = feat
+
+		[group boom]
+		scope = tree
+		run   = false
+	CONF
+	out=$(cd "$repo" &&
+		printf 'feat: a valid message\n' |
+		GITHOOKS_CONF=$repo/hooks.conf "$engine" check - 2>&1)
+	want_exit 'check/a failed lane with a valid message exits 1' 1 $?
+	want_not_in 'check/a failed lane does not print the message shape' \
+		'the shape' "$out"
 }
 
 case_symlink_skipped() {
@@ -759,6 +792,7 @@ case_check_sees_unstaged
 case_check_sees_untracked
 case_check_never_stages
 case_check_grades_stdin
+case_check_message_after_a_failed_lane
 case_symlink_skipped
 case_runs_from_a_subdir
 case_no_match_runs_always

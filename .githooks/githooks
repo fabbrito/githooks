@@ -50,6 +50,9 @@ fi
 
 status=0
 scope_rejected=0
+# Rejections printed so far. A count, not $status: `check` runs lanes before
+# the message, and a lane failure must not read as a message rejection.
+rejections=0
 
 # A usage, config or environment problem - including git itself failing.
 # Never 1: none of these judged the commit, and a 1 invites --no-verify as
@@ -68,6 +71,7 @@ reject() {
 		printf '  %s\n' "$line" >&2
 	done
 	status=1
+	rejections=$((rejections + 1))
 }
 
 note() {
@@ -598,6 +602,7 @@ cmd_commit_msg() {
 }
 
 grade_message() {
+	local before=$rejections
 	read_message "$1"
 
 	if ((${#lines[@]} == 0)); then
@@ -613,7 +618,7 @@ grade_message() {
 	grade_subject "${lines[0]}"
 	grade_body
 
-	((status != 0)) && print_shape
+	((rejections > before)) && print_shape
 	return 0
 }
 

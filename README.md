@@ -78,8 +78,8 @@ Exit codes: `0` ok, `1` rejected or a lane failed, `2` usage, config, or a broke
 including git itself failing. `2` is distinct on purpose: none of those judged your commit, and a
 `1` invites `--no-verify` when the real problem is the machine.
 
-`GITHOOKS_SKIP=1` passes anything. `GITHOOKS_CONF=<file>` points at another config, which is how the
-tests run.
+`GITHOOKS_SKIP=1` passes either hook command; `check` is not a hook and does not honor it.
+`GITHOOKS_CONF=<file>` points at another config, which is how the tests run.
 
 ## Message rules
 
