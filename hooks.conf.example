@@ -29,7 +29,8 @@ bullet_max = 2
 #
 # scope_fixed: names that are not directories.
 # scope_root:  a glob, once per line. Every directory it finds contributes its
-#              basename. An unmatched glob is dropped, not an error.
+#              basename. An unmatched glob is dropped, not an error. One glob
+#              per line: whitespace in a pattern splits it.
 scope_fixed = repo docs tools setup hooks make
 # scope_root = dotfiles/common/*/
 # scope_root = installers/*/

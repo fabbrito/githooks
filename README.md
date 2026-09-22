@@ -69,7 +69,7 @@ fresh clone is covered without anyone remembering. A node repo uses `prepare`.
 | Command                              | Does                                                                                                                                     |
 | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
 | `githooks commit-msg <file>`         | Grade the message at `$1`. Called by the shim.                                                                                           |
-| `githooks pre-commit [--fix]`        | Run lanes over the staged set. Called by the shim.                                                                                       |
+| `githooks pre-commit [--fix]`        | Run lanes over the staged set, refusing when the worktree diverges from it. Called by the shim.                                          |
 | `githooks check [--fix] [<file>\|-]` | The gate for humans and agents: lanes over working changes, untracked files included, plus a message when one is given. `-` reads stdin. |
 | `githooks version`                   | Print the version and schema.                                                                                                            |
 | `githooks help`, `-h`, `--help`      | Print the command list.                                                                                                                  |
@@ -78,8 +78,8 @@ Exit codes: `0` ok, `1` rejected or a lane failed, `2` usage, config, or a broke
 including git itself failing. `2` is distinct on purpose: none of those judged your commit, and a
 `1` invites `--no-verify` when the real problem is the machine.
 
-`GITHOOKS_SKIP=1` passes anything. `GITHOOKS_CONF=<file>` points at another config, which is how the
-tests run.
+`GITHOOKS_SKIP=1` passes either hook command; `check` is not a hook and does not honor it.
+`GITHOOKS_CONF=<file>` points at another config, which is how the tests run.
 
 ## Message rules
 
@@ -127,6 +127,8 @@ run     = shellcheck -x
   and a second line is exit 2 naming the first — a replaced `match` narrows a lane into silence,
   which nothing downstream can catch.
 - A missing command warns and skips. `require = true` makes it fail instead.
+- The first word resolves against `PATH`, never the engine: internal functions carry a `gh_` prefix,
+  so a conf naming one reads as a missing command rather than calling in-process.
 - Commands are exec'd as written, split on whitespace: no quoting, no redirection, no pipeline, no
   glob expansion, and the lane inherits the caller's stdin, stdout and stderr. Needing any of those
   means a script the lane calls.
@@ -135,9 +137,16 @@ run     = shellcheck -x
   The engine hands its lanes what it was given and does not launder it.
 
 `--fix` swaps `run` for `fix`. Under `pre-commit --fix` the matched paths are re-staged — the only
-thing this tool mutates — and it **refuses** when a matched file has both staged and unstaged
-changes, rather than swallowing the half you left out. `check --fix` formats but never stages, so it
-never refuses: staging those files would make a decision you have not made.
+thing this tool mutates — and it **refuses** when one of them has both staged and unstaged changes,
+rather than swallowing the half you left out. That holds at every scope: a `tree` lane reads the
+worktree freely, but it never stages bytes you did not.
+
+`pre-commit` grades the **index**, but a lane opens a path in the **worktree**. Where the two
+disagree for a path a lane would read — staged then edited, or staged then deleted — it refuses
+rather than grade bytes nobody staged: `git add` them, or `git stash push` them, then retry. The
+refusal is per group, so a dirty file no lane reads never blocks the commit. `check` judges the
+worktree by contract and never refuses; `check --fix` formats but never stages, since staging those
+files would make a decision you have not made.
 
 Anything the config cannot express — a vault guard, a secret scan — is a script it calls, or a
 native `pre-commit` that runs the engine and then its own guard. The format does not grow

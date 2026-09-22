@@ -18,7 +18,10 @@ hand-edit it.
 - Every rejection says what is wrong **and what to write instead**. Only the first half is an
   unfinished feature.
 - Exit 2 for usage, config, or a broken environment (git failing, no repo); 1 only for a real
-  rejection. Nothing that failed to judge the commit may exit 1.
+  rejection. A `require = true` lane whose command is missing is a rejection (1): the policy made
+  the tool mandatory, and the fix is on the machine.
+- `pre-commit` grades the index; a lane opens the worktree. Where they disagree on a path a lane
+  would read, refuse — never grade bytes the commit will not ship.
 - Aggregate: grade the whole message, run every matching group. One pass, everything to fix.
 
 ## Shell
@@ -28,6 +31,8 @@ hand-edit it.
 - A regex with a bracket class goes in a variable: inline, `[[:space:]]` reads as the closing `]]`
   to more than one parser, `shfmt` included.
 - Config values are split on whitespace, never `eval`'d. A lane that needs quoting is a script.
+- Engine functions carry a `gh_` prefix. A lane runs in the shell the engine defines them in, so a
+  bare name would shadow a PATH tool.
 
 ## Tests
 
@@ -37,7 +42,8 @@ hand-edit it.
 
 ## Commits
 
-- Every commit lands green: `make check` runs the vendored engine over the staged set.
+- Every commit lands green: the `pre-commit` hook runs the vendored engine over the staged set.
+  `make check` runs the same lanes over the worktree, before you stage.
 - `type(scope): subject`, scope from `.githooks/hooks.conf`. The hook owns the shape and prints it
   on reject — do not restate it here.
 - AI co-authored: `Co-Authored-By:` naming the model. Never a session link.
