@@ -738,6 +738,22 @@ gh_run_group() {
 
 	[[ -z $commands ]] && return 0
 
+	# A `tree` lane reads the worktree by contract, but re-staging a diverged
+	# path would stage the half nobody staged. Before the lanes: a fixer
+	# rewrites the worktree it would be compared against.
+	if $fix && $restage && [[ -n ${g_fix[$group]} ]] && ((${#matched[@]} > 0)); then
+		dirty=()
+		for path in "${matched[@]}"; do
+			gh_in_list "$path" "${partial[@]}" && dirty+=("$path")
+		done
+		if ((${#dirty[@]} > 0)); then
+			gh_reject "[$group] --fix would re-stage what the worktree changed" \
+				"${dirty[@]}" \
+				'write: git add those paths, or git stash push them, then retry'
+			return 0
+		fi
+	fi
+
 	local failed=0
 	while IFS= read -r line; do
 		[[ -z $line ]] && continue

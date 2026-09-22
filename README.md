@@ -137,7 +137,9 @@ run     = shellcheck -x
   The engine hands its lanes what it was given and does not launder it.
 
 `--fix` swaps `run` for `fix`. Under `pre-commit --fix` the matched paths are re-staged — the only
-thing this tool mutates.
+thing this tool mutates — and it **refuses** when one of them has both staged and unstaged changes,
+rather than swallowing the half you left out. That holds at every scope: a `tree` lane reads the
+worktree freely, but it never stages bytes you did not.
 
 `pre-commit` grades the **index**, but a lane opens a path in the **worktree**. Where the two
 disagree for a path a lane would read — staged then edited, or staged then deleted — it refuses

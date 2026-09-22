@@ -486,6 +486,33 @@ case_fix_refuses_partial() {
 	want_in 'pre-commit/--fix names the partial file' 'a.sh' "$out"
 }
 
+# The same refusal at `tree` scope: the lane reads the worktree freely, but
+# `--fix` still re-stages, and a diverged path would stage the half nobody did.
+case_fix_refuses_partial_at_tree_scope() {
+	local out staged
+	mkrepo <<-'CONF' || return
+		schema = 1
+
+		[group shell]
+		match = *.sh
+		scope = tree
+		run   = printf check\n
+		fix   = true
+	CONF
+	printf 'one\n' >"$repo/a.sh"
+	git -C "$repo" add a.sh
+	printf 'two\n' >>"$repo/a.sh"
+
+	out=$(in_repo pre-commit --fix)
+	want_exit 'pre-commit/--fix refuses a partial stage at tree scope' 1 $?
+	want_in 'pre-commit/--fix names the partial file at tree scope' 'a.sh' "$out"
+
+	staged=$(git -C "$repo" show :a.sh)
+	want_in 'pre-commit/a tree fixer leaves the index alone' 'one' "$staged"
+	want_not_in 'pre-commit/a tree fixer never swallows the unstaged half' \
+		'two' "$staged"
+}
+
 # A staged lane reads the worktree. Editing a file after `git add` leaves the
 # index holding what will ship; the lane would grade the worktree instead.
 case_pre_commit_refuses_a_dirty_staged_path() {
@@ -918,6 +945,7 @@ cases=(
 	case_fix_and_restage
 	case_fix_failure_never_stages
 	case_fix_refuses_partial
+	case_fix_refuses_partial_at_tree_scope
 	case_pre_commit_refuses_a_dirty_staged_path
 	case_pre_commit_refuses_a_deleted_staged_path
 	case_pre_commit_ignores_a_dirty_path_no_lane_reads
