@@ -759,7 +759,7 @@ case_cli_surface() {
 
 # ------------------------------------------------------------------ config
 
-case_conf_errors() {
+case_conf_unknown_key() {
 	local out
 	mkrepo <<-'CONF' || return
 		schema = 1
@@ -768,30 +768,42 @@ case_conf_errors() {
 	out=$(in_repo check)
 	want_exit 'conf/unknown key exits 2' 2 $?
 	want_in 'conf/unknown key names the key' 'subjet_max' "$out"
+}
 
+case_conf_bad_value() {
+	local out
 	mkrepo <<-'CONF' || return
 		schema      = 1
 		subject_max = wide
 	CONF
 	out=$(in_repo check)
 	want_exit 'conf/bad value exits 2' 2 $?
+}
 
+case_conf_unknown_schema() {
+	local out
 	mkrepo <<-'CONF' || return
 		schema = 99
 	CONF
 	out=$(in_repo check)
 	want_exit 'conf/unknown schema exits 2' 2 $?
 	want_in 'conf/unknown schema names the stale side' 'stale' "$out"
+}
 
+case_conf_malformed_group_header() {
+	local out
 	mkrepo <<-'CONF' || return
 		[group shell
 		run = true
 	CONF
 	out=$(in_repo check)
 	want_exit 'conf/malformed group header exits 2' 2 $?
+}
 
-	# A second `match` replaced the first and the lane went quiet - the one
-	# config typo nothing downstream can catch.
+# A second `match` replaced the first and the lane went quiet - the one config
+# typo nothing downstream can catch.
+case_conf_duplicate_key() {
+	local out
 	mkrepo <<-'CONF' || return
 		schema = 1
 
@@ -806,7 +818,10 @@ case_conf_errors() {
 	want_in 'conf/a duplicate key names both lines' 'first at line 4' "$out"
 	want_in 'conf/a duplicate key says what to write' \
 		'write one match line' "$out"
+}
 
+case_conf_duplicate_top_level_key() {
+	local out
 	mkrepo <<-'CONF' || return
 		schema      = 1
 		subject_max = 72
@@ -814,10 +829,13 @@ case_conf_errors() {
 	CONF
 	out=$(in_repo check)
 	want_exit 'conf/a duplicate top-level key exits 2' 2 $?
+}
 
-	# `run` still stacks, and one key per group is per *group*: two groups
-	# each write their own. `scope_root` accumulating is the commit-msg
-	# fixture conf, which derives its scopes from two of them.
+# `run` still stacks, and one key per group is per *group*: two groups each
+# write their own. `scope_root` accumulating is the commit-msg fixture conf,
+# which derives its scopes from two of them.
+case_conf_accumulating_keys() {
+	local out
 	mkrepo <<-'CONF' || return
 		schema = 1
 
@@ -845,33 +863,57 @@ case_conf_errors() {
 make_fixture_repo || exit 1
 run_commit_msg
 run_commit_msg_output
-case_empty_staged
-case_check_clean_tree
-case_tree_match_filters
-case_tree_match_deletion
-case_match_and_paths
-case_aggregate
-case_missing_tool
-case_deleted_path
-case_scope_tree
-case_fix_and_restage
-case_fix_failure_never_stages
-case_fix_refuses_partial
-case_pre_commit_refuses_a_dirty_staged_path
-case_pre_commit_refuses_a_deleted_staged_path
-case_pre_commit_ignores_a_dirty_path_no_lane_reads
-case_check_sees_unstaged
-case_check_sees_untracked
-case_check_never_stages
-case_check_grades_stdin
-case_check_message_after_a_failed_lane
-case_symlink_skipped
-case_runs_from_a_subdir
-case_no_match_runs_always
-case_lane_failure_names_the_fixer
-case_outside_a_repo
-case_cli_surface
-case_conf_errors
+
+# Every case_* function must appear here. A defined-but-unregistered case does
+# not run, and a test that does not run is the failure this harness exists to
+# catch - so the guard below fails the run rather than staying quiet.
+cases=(
+	case_empty_staged
+	case_check_clean_tree
+	case_tree_match_filters
+	case_tree_match_deletion
+	case_match_and_paths
+	case_aggregate
+	case_missing_tool
+	case_deleted_path
+	case_scope_tree
+	case_fix_and_restage
+	case_fix_failure_never_stages
+	case_fix_refuses_partial
+	case_pre_commit_refuses_a_dirty_staged_path
+	case_pre_commit_refuses_a_deleted_staged_path
+	case_pre_commit_ignores_a_dirty_path_no_lane_reads
+	case_check_sees_unstaged
+	case_check_sees_untracked
+	case_check_never_stages
+	case_check_grades_stdin
+	case_check_message_after_a_failed_lane
+	case_symlink_skipped
+	case_runs_from_a_subdir
+	case_no_match_runs_always
+	case_lane_failure_names_the_fixer
+	case_outside_a_repo
+	case_cli_surface
+	case_conf_unknown_key
+	case_conf_bad_value
+	case_conf_unknown_schema
+	case_conf_malformed_group_header
+	case_conf_duplicate_key
+	case_conf_duplicate_top_level_key
+	case_conf_accumulating_keys
+)
+
+for case_name in "${cases[@]}"; do
+	"$case_name"
+done
+
+for defined in $(compgen -A function 'case_'); do
+	registered=false
+	for listed in "${cases[@]}"; do
+		[[ $defined == "$listed" ]] && registered=true && break
+	done
+	$registered || no "harness/$defined is defined but never registered"
+done
 
 printf '\n%d passed, %d failed\n' "$passed" "$failed"
 ((failed == 0))
