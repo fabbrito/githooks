@@ -29,6 +29,10 @@ re_trailer='^([A-Za-z][A-Za-z0-9-]*):[[:space:]]*(.*)$'
 re_person='^.+[[:space:]]<[^[:space:]@]+@[^[:space:]]+>$'
 re_token='^[^[:space:]]+$'
 
+# Git's cut line, exactly: "# ", 24 dashes, " >8 ", 24 dashes. Git ends the
+# message only at this line - not at any comment that happens to hold ">8".
+cut_line='# ------------------------ >8 ------------------------'
+
 # Bash floor. Exists for the error message, not for portability: without it a
 # 3.2 shell dies on a syntax error 300 lines from the cause.
 if ((BASH_VERSINFO[0] < 4)) ||
@@ -371,7 +375,7 @@ gh_read_message() {
 
 	for line in "${raw[@]}"; do
 		line=${line%$'\r'}
-		[[ $line =~ ^#.*\>8 ]] && break
+		[[ $line == "$cut_line" ]] && break
 		[[ $line == '#'* ]] && continue
 		lines+=("${line%"${line##*[![:space:]]}"}")
 	done
@@ -792,7 +796,7 @@ gh_cmd_pre_commit() {
 }
 
 gh_cmd_check() {
-	local fix=false msgfile=''
+	local fix=false msgfile='' positional=0
 
 	while (($# > 0)); do
 		case $1 in
@@ -800,11 +804,17 @@ gh_cmd_check() {
 			-*)
 				[[ $1 == '-' ]] || gh_die 'usage: githooks check [--fix] [<file>|-]'
 				msgfile=$1
+				positional=$((positional + 1))
 				;;
-			*) msgfile=$1 ;;
+			*)
+				msgfile=$1
+				positional=$((positional + 1))
+				;;
 		esac
 		shift
 	done
+
+	((positional > 1)) && gh_die 'usage: githooks check [--fix] [<file>|-]'
 
 	# No re-staging here: these files were never staged, and staging them
 	# would commit a decision the user has not made.
@@ -851,6 +861,11 @@ gh_main() {
 			gh_usage
 			return 0
 			;;
+		commit-msg | pre-commit | check) ;;
+		*)
+			gh_usage >&2
+			exit 2
+			;;
 	esac
 
 	gh_find_root
@@ -863,10 +878,6 @@ gh_main() {
 		commit-msg) gh_cmd_commit_msg "$@" ;;
 		pre-commit) gh_cmd_pre_commit "$@" ;;
 		check) gh_cmd_check "$@" ;;
-		*)
-			gh_usage >&2
-			exit 2
-			;;
 	esac
 
 	return $status

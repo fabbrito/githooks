@@ -762,6 +762,10 @@ case_outside_a_repo() {
 	out=$(cd "$dir" && GITHOOKS_CONF=$dir/hooks.conf "$engine" pre-commit 2>&1)
 	want_exit 'engine/outside a repo exits 2' 2 $?
 	want_in 'engine/outside a repo says so' 'not inside a git repository' "$out"
+
+	out=$(cd "$dir" && "$engine" typo 2>&1)
+	want_exit 'engine/an unknown command exits 2' 2 $?
+	want_in 'engine/an unknown command shows usage' 'usage: githooks' "$out"
 }
 
 case_cli_surface() {
@@ -784,6 +788,11 @@ case_cli_surface() {
 
 	in_repo pre-commit --nope >/dev/null 2>&1
 	want_exit 'cli/an unknown flag exits 2' 2 $?
+
+	printf 'feat(conf): a\n' >"$repo/a.msg"
+	printf 'nope\n' >"$repo/b.msg"
+	in_repo check a.msg b.msg >/dev/null 2>&1
+	want_exit 'cli/check with two files exits 2' 2 $?
 }
 
 # ------------------------------------------------------------------ config
