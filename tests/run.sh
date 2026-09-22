@@ -136,6 +136,16 @@ run_commit_msg_output() {
 	want_not_in 'commit-msg/bad-prose-body rejects once' \
 		'is not a bullet' "$out"
 
+	# A wrapped bullet names the bullet and the wrap, so the fix is not
+	# "prefix a dash" - which the next pass would reject as a third bullet.
+	out=$(grade bad-wrapped-bullet)
+	want_in 'commit-msg/bad-wrapped-bullet names the wrap' \
+		'bullet wraps across lines 3-4' "$out"
+	want_in 'commit-msg/bad-wrapped-bullet says one bullet per line' \
+		'one bullet per line' "$out"
+	want_not_in 'commit-msg/bad-wrapped-bullet does not suggest a dash' \
+		'write: -' "$out"
+
 	grade bad-shape GITHOOKS_SKIP=1 >/dev/null 2>&1
 	want_exit 'commit-msg GITHOOKS_SKIP passes anything' 0 $?
 

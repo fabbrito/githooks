@@ -88,8 +88,8 @@ including git itself failing. `2` is distinct on purpose: none of those judged y
 - **Subject** — `type` from `types`; `scope`, when present, from the allowlist; the text
   lowercase-first with no trailing period; the whole line at most `subject_max`.
 - **Body** — one blank line, then `- ` bullets and nothing else: at most `bullet_max` of them, each
-  at most `body_cols`. One more blank line before the trailer block is allowed: that is what git
-  itself writes.
+  one line of at most `body_cols`. A wrapped line is not a bullet, it is the bullet above it. One
+  more blank line before the trailer block is allowed: that is what git itself writes.
 - **Trailers** — the allowlist is `trailer_person` plus `trailer_reference`, and nothing else.
   Person keys take `Name <email>`, reference keys take one token. Once a trailer appears, only
   trailers may follow.
