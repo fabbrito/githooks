@@ -163,6 +163,18 @@ lane starts — checked harder than a formatter would.
 is exit 2, naming both numbers and which side is stale. Inside a schema it knows, an unknown key is
 a typo rather than a future feature, so that is exit 2 as well.
 
+## Versioning
+
+Three questions, in order. The first `yes` is the bump.
+
+- **Major** — must a consumer edit a file? A `hooks.conf` that parsed no longer parses, a command
+  renamed or removed, an exit code that changes meaning.
+- **Minor** — can a repo that was green go red with no edit? A new rejection, a widened one, a lane
+  that runs where it did not.
+- **Patch** — neither.
+
+Pre-1.0 the major row is empty: its cases land as a minor. `1.0.0` when the feature set is stable.
+
 ## Not here
 
 No lock file, no integrity check, no self-update, no staleness sweep, no CI. Every copy is bumped by
