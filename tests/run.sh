@@ -710,6 +710,30 @@ case_no_match_runs_always() {
 	want_in 'pre-commit/a group with no match always runs' 'ran' "$out"
 }
 
+# The engine defines its own functions in the same shell a lane runs in. They
+# carry a `gh_` prefix so a conf cannot name one by accident: a bare engine
+# name reads as a missing tool, and nothing runs in-process.
+case_lane_never_calls_engine_functions() {
+	local out
+	mkrepo <<-'CONF' || return
+		schema = 1
+
+		[group probe]
+		scope   = staged
+		require = true
+		run     = print_shape
+	CONF
+	printf 'x\n' >"$repo/a.md"
+	git -C "$repo" add -A
+
+	out=$(in_repo pre-commit)
+	want_exit 'pre-commit/a lane cannot reach an engine function' 1 $?
+	want_not_in 'pre-commit/engine internals stay out of lanes' \
+		'the shape:' "$out"
+	want_in 'pre-commit/the engine name reads as missing' \
+		'print_shape not found' "$out"
+}
+
 case_lane_failure_names_the_fixer() {
 	local out
 	mkrepo <<-'CONF' || return
@@ -896,6 +920,7 @@ cases=(
 	case_symlink_skipped
 	case_runs_from_a_subdir
 	case_no_match_runs_always
+	case_lane_never_calls_engine_functions
 	case_lane_failure_names_the_fixer
 	case_outside_a_repo
 	case_cli_surface

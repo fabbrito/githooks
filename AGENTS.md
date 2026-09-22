@@ -31,6 +31,8 @@ hand-edit it.
 - A regex with a bracket class goes in a variable: inline, `[[:space:]]` reads as the closing `]]`
   to more than one parser, `shfmt` included.
 - Config values are split on whitespace, never `eval`'d. A lane that needs quoting is a script.
+- Engine functions carry a `gh_` prefix. A lane runs in the shell the engine defines them in, so a
+  bare name would shadow a PATH tool.
 
 ## Tests
 

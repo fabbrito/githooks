@@ -127,6 +127,8 @@ run     = shellcheck -x
   and a second line is exit 2 naming the first — a replaced `match` narrows a lane into silence,
   which nothing downstream can catch.
 - A missing command warns and skips. `require = true` makes it fail instead.
+- The first word resolves against `PATH`, never the engine: internal functions carry a `gh_` prefix,
+  so a conf naming one reads as a missing command rather than calling in-process.
 - Commands are exec'd as written, split on whitespace: no quoting, no redirection, no pipeline, no
   glob expansion, and the lane inherits the caller's stdin, stdout and stderr. Needing any of those
   means a script the lane calls.
