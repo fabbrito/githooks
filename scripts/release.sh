@@ -52,6 +52,14 @@ if git remote get-url origin >/dev/null 2>&1; then
 	git fetch --quiet origin master || die 'cannot fetch origin'
 	git merge-base --is-ancestor origin/master HEAD ||
 		refuse 'origin/master has commits this branch lacks'
+	# A tag absent here may still be on origin: a stale clone, a pruned tag.
+	# `git tag` would not see it, so the release would collide at publish time.
+	git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null
+	case $? in
+		0) refuse "$tag exists on origin - a release is never moved, cut the next patch" ;;
+		2) ;;
+		*) die 'cannot list tags on origin' ;;
+	esac
 fi
 
 if $dry; then
