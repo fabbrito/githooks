@@ -66,13 +66,13 @@ fresh clone is covered without anyone remembering. A node repo uses `prepare`.
 
 ## Commands
 
-| Command                              | Does                                                                                                                                     |
-| ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `githooks commit-msg <file>`         | Grade the message at `$1`. Called by the shim.                                                                                           |
-| `githooks pre-commit [--fix]`        | Run lanes over the staged set, refusing when the worktree diverges from it. Called by the shim.                                          |
-| `githooks check [--fix] [<file>\|-]` | The gate for humans and agents: lanes over working changes, untracked files included, plus a message when one is given. `-` reads stdin. |
-| `githooks version`                   | Print the version and schema.                                                                                                            |
-| `githooks help`, `-h`, `--help`      | Print the command list.                                                                                                                  |
+| Command                                      | Does                                                                                                                                                                                                        |
+| -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `githooks commit-msg <file>`                 | Grade the message at `$1`. Called by the shim.                                                                                                                                                              |
+| `githooks pre-commit [--fix]`                | Run lanes over the staged set, refusing when the worktree diverges from it. Called by the shim.                                                                                                             |
+| `githooks check [--all] [--fix] [<file>\|-]` | The gate for humans and agents: lanes over working changes, untracked files included, plus a message when one is given. `--all` runs them over every readable file instead of the changes. `-` reads stdin. |
+| `githooks version`                           | Print the version and schema.                                                                                                                                                                               |
+| `githooks help`, `-h`, `--help`              | Print the command list.                                                                                                                                                                                     |
 
 Exit codes: `0` ok, `1` rejected or a lane failed, `2` usage, config, or a broken environment,
 including git itself failing. `2` is distinct on purpose: none of those judged your commit, and a
@@ -123,6 +123,11 @@ run     = shellcheck -x
 - An empty staged set (`commit --amend --no-edit`) runs no `staged` lane — there is nothing to hand
   it. Every `tree` lane still runs, `match` or not: a `match` filters what changed and nothing did,
   while the invariant does not. That is the lane you least want going quiet.
+- `check --all` swaps the change set for every file a lane can read — tracked and untracked, no
+  ignored files, no symlinks, no deletions — and `match` is unchanged, so `*.sh` now means the whole
+  tree's. `scope = tree` lanes still run pathless, and a `match`ed `tree` lane still fires on a
+  deletion. A lane whose glob matches nothing in the tree runs no `staged` lane, exactly as an empty
+  set leaves it quiet. `pre-commit` refuses the flag: its contract is the index.
 - `run`, `fix` and `scope_root` take a line each and accumulate. Every other key is written once,
   and a second line is exit 2 naming the first — a replaced `match` narrows a lane into silence,
   which nothing downstream can catch.

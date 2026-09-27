@@ -7,7 +7,8 @@
 #
 #   githooks commit-msg <file>          grade a message
 #   githooks pre-commit [--fix]         lanes over the staged set
-#   githooks check [--fix] [<file>|-]   lanes over working changes, + a message
+#   githooks check [--all] [--fix] [<file>|-]
+#                                       lanes over working changes, + a message
 #   githooks version                    print the version
 #
 # Exit: 0 ok, 1 rejected or a lane failed, 2 usage, config or a broken
@@ -342,6 +343,14 @@ gh_read_worktree() {
 
 	gh_read_paths untracked true ls-files --others --exclude-standard -z
 	files+=("${untracked[@]}")
+}
+
+# What `check --all` judges: every path a lane can read, change set or not.
+# Same filter as above, and no HEAD: `ls-files` needs no commit, so a fresh
+# `git init` works. `--cached` still lists a path deleted from the worktree,
+# which `gh_keep_path` drops like any symlink.
+gh_read_all() {
+	gh_read_paths files true ls-files --cached --others --exclude-standard -z
 }
 
 # Staged paths the worktree no longer matches: modified after staging, or
@@ -834,13 +843,15 @@ gh_cmd_pre_commit() {
 }
 
 gh_cmd_check() {
-	local fix=false msgfile='' positional=0
+	local fix=false all=false msgfile='' positional=0
 
 	while (($# > 0)); do
 		case $1 in
 			--fix) fix=true ;;
+			--all) all=true ;;
 			-*)
-				[[ $1 == '-' ]] || gh_die 'usage: githooks check [--fix] [<file>|-]'
+				[[ $1 == '-' ]] ||
+					gh_die 'usage: githooks check [--all] [--fix] [<file>|-]'
 				msgfile=$1
 				positional=$((positional + 1))
 				;;
@@ -852,12 +863,16 @@ gh_cmd_check() {
 		shift
 	done
 
-	((positional > 1)) && gh_die 'usage: githooks check [--fix] [<file>|-]'
+	((positional > 1)) && gh_die 'usage: githooks check [--all] [--fix] [<file>|-]'
 
 	# No re-staging here: these files were never staged, and staging them
 	# would commit a decision the user has not made.
 	restage=false
-	gh_read_worktree
+	if $all; then
+		gh_read_all
+	else
+		gh_read_worktree
+	fi
 	gh_read_deleted_worktree
 	partial=()
 	gh_dispatch "$fix"
@@ -872,10 +887,10 @@ gh_usage() {
 	cat <<-'EOF'
 		usage: githooks <command> [args]
 
-		  commit-msg <file>          grade a commit message
-		  pre-commit [--fix]         run lanes over the staged set
-		  check [--fix] [<file>|-]   run lanes over working changes, grade a message
-		  version                    print the version
+		  commit-msg <file>                 grade a commit message
+		  pre-commit [--fix]                run lanes over the staged set
+		  check [--all] [--fix] [<file>|-]  run lanes over working changes, grade a message
+		  version                           print the version
 
 		exit: 0 ok, 1 rejected or a lane failed, 2 usage, config or environment
 	EOF

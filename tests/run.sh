@@ -826,6 +826,9 @@ case_cli_surface() {
 	in_repo pre-commit --nope >/dev/null 2>&1
 	want_exit 'cli/an unknown flag exits 2' 2 $?
 
+	in_repo pre-commit --all >/dev/null 2>&1
+	want_exit 'cli/pre-commit --all exits 2' 2 $?
+
 	printf 'feat(conf): a\n' >"$repo/a.msg"
 	printf 'nope\n' >"$repo/b.msg"
 	in_repo check a.msg b.msg >/dev/null 2>&1
@@ -933,6 +936,132 @@ case_conf_accumulating_keys() {
 	want_in 'conf/each group writes its own match' 'three' "$out"
 }
 
+# --------------------------------------------------------------- check --all
+
+# `--all` swaps the change set for the whole tree, with the same filter `check`
+# already applies to what it does judge.
+case_check_all_files() {
+	local out
+	mkrepo <<-'CONF' || return
+		schema = 1
+
+		[group shell]
+		match = *.sh
+		run   = printf path:%s\n
+
+		[group removed]
+		match = gone.sh
+		scope = tree
+		run   = printf deletion-trigger\n
+	CONF
+	printf 'ign.sh\n' >"$repo/.gitignore"
+	printf 'x\n' >"$repo/a.sh"
+	printf 'x\n' >"$repo/gone.sh"
+	ln -s a.sh "$repo/link.sh"
+	git -C "$repo" add -A
+	git -C "$repo" commit -qm 'init'
+	printf 'z\n' >"$repo/new.sh"
+	printf 'z\n' >"$repo/ign.sh"
+	rm "$repo/gone.sh"
+
+	out=$(in_repo check --all)
+	want_exit 'check --all exits 0' 0 $?
+	want_in 'check --all reaches an unchanged tracked file' 'path:a.sh' "$out"
+	want_in 'check --all reaches an untracked file' 'path:new.sh' "$out"
+	want_not_in 'check --all drops an ignored file' 'path:ign.sh' "$out"
+	want_not_in 'check --all drops a symlink' 'path:link.sh' "$out"
+	want_not_in 'check --all drops a deleted path' 'path:gone.sh' "$out"
+	want_in 'check --all keeps the deletion trigger for a tree lane' \
+		'deletion-trigger' "$out"
+
+	# Without the flag the change set is still what it was: new.sh only.
+	out=$(in_repo check)
+	want_in 'check alone still judges the change set' 'path:new.sh' "$out"
+	want_not_in 'check alone ignores an unchanged file' 'path:a.sh' "$out"
+}
+
+# The other half of the fixture above: a glob that matches nothing in the tree
+# leaves a `staged` lane with nothing to hand it, exactly as an empty change
+# set does. The lane that does match proves the run was not vacuous.
+case_check_all_skips_unmatched_lane() {
+	local out
+	mkrepo <<-'CONF' || return
+		schema = 1
+
+		[group rust]
+		match = *.rs
+		run   = printf ran-rust\n
+
+		[group docs]
+		match = *.md
+		run   = printf ran-docs\n
+	CONF
+	printf 'x\n' >"$repo/a.md"
+
+	out=$(in_repo check --all)
+	want_exit 'check --all exits 0' 0 $?
+	want_in 'check --all runs a lane the tree feeds' 'ran-docs' "$out"
+	want_not_in 'check --all skips a lane no file feeds' 'ran-rust' "$out"
+}
+
+# "All files" cannot lean on HEAD: a fresh clone or `git init` has none.
+case_check_all_without_head() {
+	local out
+	mkrepo <<-'CONF' || return
+		schema = 1
+
+		[group shell]
+		match = *.sh
+		run   = printf path:%s\n
+	CONF
+	git -C "$repo" rev-parse --verify --quiet HEAD >/dev/null 2>&1
+	want_exit 'the fixture has no HEAD yet' 1 $?
+
+	printf 'x\n' >"$repo/a.sh"
+	out=$(in_repo check --all)
+	want_exit 'check --all works with no commits yet' 0 $?
+	want_in 'check --all reaches the only file, uncommitted' 'path:a.sh' "$out"
+}
+
+# `--fix --all` formats the whole tree but stages nothing, same as `check
+# --fix`: these files were never staged.
+case_check_all_fix_never_stages() {
+	local out staged
+	mkrepo <<-'CONF' || return
+		schema = 1
+
+		[group shell]
+		match = *.sh
+		run   = true
+		fix   = printf fixed:%s\n
+	CONF
+	printf 'x\n' >"$repo/a.sh"
+	git -C "$repo" add -A
+	git -C "$repo" commit -qm 'init'
+	printf 'y\n' >"$repo/new.sh"
+
+	out=$(in_repo check --all --fix)
+	want_exit 'check --all --fix exits 0' 0 $?
+	want_in 'check --all --fix runs the fixer over an untracked file' \
+		'fixed:new.sh' "$out"
+	staged=$(git -C "$repo" diff --cached --name-only)
+	want_not_in 'check --all --fix stages nothing' 'new.sh' "$staged"
+}
+
+# A message is graded after the lanes, `--all` or not.
+case_check_all_grades_message() {
+	local out
+	mkrepo <<-'CONF' || return
+		schema = 1
+		types  = feat
+	CONF
+	out=$(cd "$repo" &&
+		printf 'nope\n' |
+		GITHOOKS_CONF=$repo/hooks.conf "$engine" check --all - 2>&1)
+	want_exit 'check --all grades a message on stdin' 1 $?
+	want_in 'check --all stdin rejection says the shape' 'the shape' "$out"
+}
+
 # -------------------------------------------------------------------- main
 
 make_fixture_repo || exit 1
@@ -978,6 +1107,11 @@ cases=(
 	case_conf_duplicate_key
 	case_conf_duplicate_top_level_key
 	case_conf_accumulating_keys
+	case_check_all_files
+	case_check_all_skips_unmatched_lane
+	case_check_all_without_head
+	case_check_all_fix_never_stages
+	case_check_all_grades_message
 )
 
 for case_name in "${cases[@]}"; do

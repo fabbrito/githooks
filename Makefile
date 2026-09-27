@@ -39,11 +39,11 @@ test: ## the fixture harness - commit-msg + dispatcher
 
 # No fmt.sh or lint.sh here: the lanes live in hooks.conf and the vendored
 # engine dispatches them. That is the whole product.
-check: vendor ## the staging gate - every lane, read only
-	.githooks/githooks check
+check: vendor ## the whole-tree gate - every lane, read only
+	.githooks/githooks check --all
 
 fmt: vendor ## the same lanes, writing - shfmt -w, prettier --write
-	.githooks/githooks check --fix
+	.githooks/githooks check --all --fix
 
 ##@ Release
 # release.sh stamps VERSION into bin/githooks, vendors, commits, tags.
