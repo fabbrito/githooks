@@ -1,7 +1,7 @@
 # githooks - the engine lives in bin/, the vendored copy in .githooks/.
 # `make check` runs the copy: this repo is its own first consumer.
 
-.PHONY: help hooks vendor test check fmt release publish
+.PHONY: help hooks vendor bump test check fmt release publish
 
 define HELP_AWK
 BEGIN {
@@ -27,6 +27,11 @@ hooks: ## enable .githooks for this clone
 vendor: ## refresh .githooks/githooks from bin/githooks
 	cp bin/githooks .githooks/githooks
 	@chmod +x .githooks/githooks
+
+# The consumer's own recipe, here so the script and the target can be copied
+# whole into another repo: bump fetches the latest release into .githooks/.
+bump: ## download the latest engine release into .githooks/githooks [DRY_RUN=1]
+	@scripts/update.sh $(if $(DRY_RUN),--dry-run)
 
 ##@ Quality
 test: ## the fixture harness - commit-msg + dispatcher
