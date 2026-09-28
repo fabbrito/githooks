@@ -1,0 +1,17 @@
+# Every consumer imports this: the message grader, and a gate on lefthook's
+# own config - `lefthook run` ignores an unknown key, `validate` does not.
+commit-msg:
+  scripts:
+    "githooks-msg.sh":
+      runner: bash
+
+pre-commit:
+  jobs:
+    - name: lefthook-validate
+      glob: ["lefthook.yml", "lefthook-local.yml"]
+      run: lefthook validate
+
+check:
+  jobs:
+    - name: lefthook-validate
+      run: lefthook validate

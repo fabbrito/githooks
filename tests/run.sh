@@ -4,7 +4,12 @@
 # itself.
 #
 #   tests/commit-msg/<name>.msg + <name>.expect   expected exit code
-#   tests/pre-commit/                             throwaway repos, built here
+#   case_*                                        throwaway repos, built here
+#
+# lefthook's mechanics are lefthook's to test - stashing, chunking, globbing.
+# These cases prove only what is ours: the grader, and how shared/ composes -
+# delivered as a remote, which job runs in which hook, which writes, which
+# stages, and the file set `check` and `fix` compute.
 #
 # No errexit: a failing case is the point, not a reason to stop.
 set -uo pipefail
@@ -16,7 +21,8 @@ cd "$(dirname "$0")/.." || exit 1
 unset GIT_DIR GIT_INDEX_FILE GIT_WORK_TREE GIT_PREFIX GIT_NAMESPACE
 unset GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_COMMON_DIR
 
-engine=$PWD/bin/githooks
+grader=$PWD/.lefthook/commit-msg/githooks-msg.sh
+src=$PWD
 tmproot=$(mktemp -d) || exit 1
 trap 'rm -rf "$tmproot"' EXIT
 
@@ -79,7 +85,7 @@ want_not_in() {
 
 # ------------------------------------------------------------- commit-msg
 
-# Grading is pure text in, exit code out - but the engine locates hooks.conf
+# Grading is pure text in, exit code out - but the grader locates hooks.conf
 # with `rev-parse --show-toplevel` and skips a message mid-rebase, so it must
 # run inside a repo. Its own, never this one: a rebase in progress here would
 # otherwise pass every fixture.
@@ -99,7 +105,7 @@ grade() {
 	shift
 	(cd "$fixture_repo" &&
 		GITHOOKS_CONF=$fixture_repo/tests/commit-msg/hooks.conf \
-			env "$@" "$engine" commit-msg "tests/commit-msg/$name.msg" 2>&1)
+			env "$@" "$grader" "tests/commit-msg/$name.msg" 2>&1)
 }
 
 run_commit_msg() {
@@ -146,9 +152,6 @@ run_commit_msg_output() {
 	want_not_in 'commit-msg/bad-wrapped-bullet does not suggest a dash' \
 		'write: -' "$out"
 
-	grade bad-shape GITHOOKS_SKIP=1 >/dev/null 2>&1
-	want_exit 'commit-msg GITHOOKS_SKIP passes anything' 0 $?
-
 	# A rebase replays messages it did not author.
 	mkdir -p "$fixture_repo/.git/rebase-merge"
 	grade bad-shape >/dev/null 2>&1
@@ -156,683 +159,90 @@ run_commit_msg_output() {
 	rmdir "$fixture_repo/.git/rebase-merge"
 }
 
-# ------------------------------------------------------------- dispatcher
+# ------------------------------------------------------------------ grader
 
-# A throwaway repo in $repo, its conf read from stdin. Not a command
-# substitution: a heredoc inside $( ) has its body outside it, which bash
-# warns about and then guesses at.
-#
-# Every body here is `<<-`, which strips leading tabs only. A fixture line
-# that must keep its indentation indents with spaces.
+# A throwaway repo in $repo, its conf read from stdin into the default path.
+# Not a command substitution: a heredoc inside $( ) has its body outside it,
+# which bash warns about and then guesses at.
 mkrepo() {
 	repo=$(mktemp -d -p "$tmproot") || return 1
 	git -C "$repo" init -q
 	git -C "$repo" config user.email 'test@example.com'
 	git -C "$repo" config user.name 'test'
-	cat >"$repo/hooks.conf"
+	mkdir -p "$repo/.githooks"
+	cat >"$repo/.githooks/hooks.conf"
 }
 
-# Run the engine inside the current fixture repo, stderr folded in.
+# Run the grader inside the current fixture repo, stderr folded in.
 in_repo() {
-	(cd "$repo" && GITHOOKS_CONF=$repo/hooks.conf "$engine" "$@" 2>&1)
+	(cd "$repo" && "$grader" "$@" 2>&1)
 }
 
-# `commit --amend --no-edit` stages nothing. A staged lane has nothing to
-# hand a formatter; every tree lane runs, `match` or not - a match filters
-# what changed and nothing did, while the invariant holds regardless. Going
-# quiet there is how a require = true group stops guarding unnoticed.
-case_empty_staged() {
+case_grades_stdin() {
 	local out
 	mkrepo <<-'CONF' || return
-		schema = 1
-
-		[group whole]
-		scope = tree
-		run   = printf ran-tree\n
-
-		[group narrow]
-		match = *.rs
-		scope = tree
-		run   = printf ran-narrow\n
-
-		[group paths]
-		scope = staged
-		run   = printf ran-staged:%s\n
-	CONF
-	out=$(in_repo pre-commit)
-	want_exit 'pre-commit/empty set exits 0' 0 $?
-	want_in 'pre-commit/a tree lane runs on an empty set' 'ran-tree' "$out"
-	want_in 'pre-commit/a matched tree lane runs on an empty set' \
-		'ran-narrow' "$out"
-	want_not_in 'pre-commit/a staged lane is never run pathless' \
-		'ran-staged' "$out"
-}
-
-# The consumer case: an invariant lane on a tree with nothing to commit.
-case_check_clean_tree() {
-	local out
-	mkrepo <<-'CONF' || return
-		schema = 1
-
-		[group whole]
-		scope   = tree
-		require = true
-		run     = printf tree-ran\n
-
-		[group narrow]
-		match   = *.sh
-		scope   = tree
-		require = true
-		run     = printf narrow-ran\n
-	CONF
-	printf 'x\n' >"$repo/a.sh"
-	git -C "$repo" add -A
-	git -C "$repo" commit -qm 'init'
-
-	out=$(in_repo check)
-	want_exit 'check/a clean tree exits 0' 0 $?
-	want_in 'check/a tree lane runs on a clean tree' 'tree-ran' "$out"
-	want_in 'check/a matched tree lane runs on a clean tree' \
-		'narrow-ran' "$out"
-}
-
-# The other half of the rule: `match` still filters once something did
-# change. A tree lane narrow enough to be cheap stays out of an unrelated
-# commit - that is the only reason to give one a `match`.
-case_tree_match_filters() {
-	local out
-	mkrepo <<-'CONF' || return
-		schema = 1
-
-		[group narrow]
-		match = *.rs
-		scope = tree
-		run   = printf narrow-ran\n
-	CONF
-	printf 'x\n' >"$repo/a.rs"
-	git -C "$repo" add -A
-	git -C "$repo" commit -qm 'init'
-	printf 'doc\n' >"$repo/README.md"
-	git -C "$repo" add -A
-
-	out=$(in_repo pre-commit)
-	want_exit 'pre-commit/an unmatched change exits 0' 0 $?
-	want_not_in 'pre-commit/a matched tree lane skips an unmatched change' \
-		'narrow-ran' "$out"
-}
-
-# A deletion is not in the changed set, so it cannot reach a lane as an
-# argument - but it still changed the tree. A tree lane's `match` is a
-# trigger, and removing a file is when its invariant is most likely broken.
-# The unmatched edit is the point: without it the set is empty and the lane
-# would run for the other reason.
-case_tree_match_deletion() {
-	local out
-	mkrepo <<-'CONF' || return
-		schema = 1
-
-		[group narrow]
-		match = *.rs
-		scope = tree
-		run   = printf narrow-ran\n
-
-		[group paths]
-		match = *.rs
-		scope = staged
-		run   = printf path:%s\n
-	CONF
-	printf 'x\n' >"$repo/a.rs"
-	printf 'doc\n' >"$repo/README.md"
-	git -C "$repo" add -A
-	git -C "$repo" commit -qm 'init'
-	git -C "$repo" rm -q a.rs
-	printf 'more\n' >>"$repo/README.md"
-
-	out=$(in_repo check)
-	want_in 'check/a deletion triggers a matched tree lane' \
-		'narrow-ran' "$out"
-
-	git -C "$repo" add -A
-	out=$(in_repo pre-commit)
-	want_exit 'pre-commit/a deletion exits 0' 0 $?
-	want_in 'pre-commit/a deletion triggers a matched tree lane' \
-		'narrow-ran' "$out"
-	want_not_in 'pre-commit/a deletion never reaches a staged lane' \
-		'path:a.rs' "$out"
-}
-
-case_match_and_paths() {
-	local out
-	mkrepo <<-'CONF' || return
-		schema = 1
-
-		[group shell]
-		match = *.sh
-		scope = staged
-		run   = printf path:%s\n
-
-		[group docs]
-		match = *.md
-		scope = staged
-		run   = printf doc:%s\n
-	CONF
-	mkdir -p "$repo/deep"
-	printf 'x\n' >"$repo/a.sh"
-	printf 'x\n' >"$repo/deep/b.sh"
-	printf 'x\n' >"$repo/c.txt"
-	git -C "$repo" add -A
-
-	out=$(in_repo pre-commit)
-	want_exit 'pre-commit/matching exits 0' 0 $?
-	want_in 'pre-commit/appends the matched path' 'path:a.sh' "$out"
-	want_in 'pre-commit/glob crosses a slash' 'path:deep/b.sh' "$out"
-	want_not_in 'pre-commit/unmatched path stays out' 'path:c.txt' "$out"
-	want_not_in 'pre-commit/group with no match is skipped' 'doc:' "$out"
-}
-
-case_aggregate() {
-	local out
-	mkrepo <<-'CONF' || return
-		schema = 1
-
-		[group first]
-		match = *.sh
-		run   = false
-
-		[group second]
-		match = *.sh
-		run   = printf second:%s\n
-	CONF
-	printf 'x\n' >"$repo/a.sh"
-	git -C "$repo" add -A
-
-	out=$(in_repo pre-commit)
-	want_exit 'pre-commit/a failed lane exits 1' 1 $?
-	want_in 'pre-commit/later groups still run' 'second:a.sh' "$out"
-}
-
-case_missing_tool() {
-	local out
-	mkrepo <<-'CONF' || return
-		schema = 1
-
-		[group soft]
-		match = *.sh
-		run   = githooks-no-such-tool
-
-		[group hard]
-		match   = *.sh
-		require = true
-		run     = githooks-no-such-tool-either
-	CONF
-	printf 'x\n' >"$repo/a.sh"
-	git -C "$repo" add -A
-
-	out=$(in_repo pre-commit)
-	want_exit 'pre-commit/require = true fails' 1 $?
-	want_in 'pre-commit/a missing tool warns' 'skip' "$out"
-	want_in 'pre-commit/require = true says what to install' \
-		'githooks-no-such-tool-either' "$out"
-}
-
-case_deleted_path() {
-	local out
-	mkrepo <<-'CONF' || return
-		schema = 1
-
-		[group shell]
-		match = *.sh
-		run   = printf path:%s\n
-	CONF
-	printf 'x\n' >"$repo/gone.sh"
-	printf 'x\n' >"$repo/kept.sh"
-	git -C "$repo" add -A
-	git -C "$repo" commit -qm 'init'
-	git -C "$repo" rm -q gone.sh
-
-	# Keep a survivor so the lane runs: a deleted path could only be visible
-	# to it as a stale argument, which is the thing under test.
-	printf 'y\n' >"$repo/kept.sh"
-	git -C "$repo" add kept.sh
-
-	out=$(in_repo pre-commit)
-	want_in 'pre-commit/a surviving path reaches the lane' \
-		'path:kept.sh' "$out"
-	want_not_in 'pre-commit/a deleted path never reaches a lane' \
-		'path:gone.sh' "$out"
-}
-
-case_scope_tree() {
-	local out
-	mkrepo <<-'CONF' || return
-		schema = 1
-
-		[group whole]
-		match = *.sh
-		scope = tree
-		run   = printf tree-ran\n
-	CONF
-	printf 'x\n' >"$repo/a.sh"
-	git -C "$repo" add -A
-
-	out=$(in_repo pre-commit)
-	want_in 'pre-commit/scope = tree takes no paths' 'tree-ran' "$out"
-	want_not_in 'pre-commit/scope = tree really takes none' 'a.sh' "$out"
-}
-
-case_fix_and_restage() {
-	local out staged
-	mkrepo <<-'CONF' || return
-		schema = 1
-
-		[group shell]
-		match = *.sh
-		run   = printf check:%s\n
-		fix   = tests/fixtures/touch.sh
-	CONF
-	mkdir -p "$repo/tests/fixtures"
-	cat >"$repo/tests/fixtures/touch.sh" <<-'FIX'
-		#!/usr/bin/env bash
-		printf 'fixed\n' >> "$1"
-	FIX
-	chmod +x "$repo/tests/fixtures/touch.sh"
-	printf 'x\n' >"$repo/a.sh"
-	git -C "$repo" add a.sh
-
-	out=$(in_repo pre-commit --fix)
-	want_exit 'pre-commit/--fix exits 0' 0 $?
-	want_not_in 'pre-commit/--fix replaces run' 'check:' "$out"
-	staged=$(git -C "$repo" show ':a.sh')
-	want_in 'pre-commit/--fix re-stages the result' 'fixed' "$staged"
-}
-
-# A fixer that rewrote the file and then failed has left something nobody
-# asked for. Staging it makes the index differ from what you staged, on the
-# one path where the commit is refused anyway.
-case_fix_failure_never_stages() {
-	local out staged
-	mkrepo <<-'CONF' || return
-		schema = 1
-
-		[group shell]
-		match = *.sh
-		run   = true
-		fix   = tests/fixtures/halfway.sh
-	CONF
-	mkdir -p "$repo/tests/fixtures"
-	cat >"$repo/tests/fixtures/halfway.sh" <<-'FIX'
-		#!/usr/bin/env bash
-		printf 'half\n' >"$1"
-		exit 3
-	FIX
-	chmod +x "$repo/tests/fixtures/halfway.sh"
-	printf 'whole\n' >"$repo/a.sh"
-	git -C "$repo" add a.sh
-
-	out=$(in_repo pre-commit --fix)
-	want_exit 'pre-commit/--fix with a failing fixer exits 1' 1 $?
-	staged=$(git -C "$repo" show ':a.sh')
-	want_in 'pre-commit/a failed fixer leaves the index alone' \
-		'whole' "$staged"
-	want_not_in 'pre-commit/a failed fixer stages nothing' 'half' "$staged"
-}
-
-case_fix_refuses_partial() {
-	local out
-	mkrepo <<-'CONF' || return
-		schema = 1
-
-		[group shell]
-		match = *.sh
-		run   = printf check:%s\n
-		fix   = true
-	CONF
-	printf 'one\n' >"$repo/a.sh"
-	git -C "$repo" add a.sh
-	printf 'two\n' >>"$repo/a.sh"
-
-	out=$(in_repo pre-commit --fix)
-	want_exit 'pre-commit/--fix refuses a partial stage' 1 $?
-	want_in 'pre-commit/--fix names the partial file' 'a.sh' "$out"
-}
-
-# The same refusal at `tree` scope: the lane reads the worktree freely, but
-# `--fix` still re-stages, and a diverged path would stage the half nobody did.
-case_fix_refuses_partial_at_tree_scope() {
-	local out staged
-	mkrepo <<-'CONF' || return
-		schema = 1
-
-		[group shell]
-		match = *.sh
-		scope = tree
-		run   = printf check\n
-		fix   = true
-	CONF
-	printf 'one\n' >"$repo/a.sh"
-	git -C "$repo" add a.sh
-	printf 'two\n' >>"$repo/a.sh"
-
-	out=$(in_repo pre-commit --fix)
-	want_exit 'pre-commit/--fix refuses a partial stage at tree scope' 1 $?
-	want_in 'pre-commit/--fix names the partial file at tree scope' 'a.sh' "$out"
-
-	staged=$(git -C "$repo" show :a.sh)
-	want_in 'pre-commit/a tree fixer leaves the index alone' 'one' "$staged"
-	want_not_in 'pre-commit/a tree fixer never swallows the unstaged half' \
-		'two' "$staged"
-}
-
-# A staged lane reads the worktree. Editing a file after `git add` leaves the
-# index holding what will ship; the lane would grade the worktree instead.
-case_pre_commit_refuses_a_dirty_staged_path() {
-	local out
-	mkrepo <<-'CONF' || return
-		schema = 1
-
-		[group shell]
-		match = *.sh
-		run   = printf lane\n
-	CONF
-	printf 'staged\n' >"$repo/a.sh"
-	git -C "$repo" add a.sh
-	printf 'worktree\n' >"$repo/a.sh"
-
-	out=$(in_repo pre-commit)
-	want_exit 'pre-commit/a staged file changed after add exits 1' 1 $?
-	want_in 'pre-commit/a staged file changed after add says why' \
-		'not what the worktree holds' "$out"
-	want_not_in 'pre-commit/a staged file changed after add runs no lane' \
-		'lane' "$out"
-}
-
-# Deleting a staged file drops it from `files` - a lane cannot be handed a
-# path that is gone - so the staged lane never ran and the commit shipped the
-# staged blob ungraded.
-case_pre_commit_refuses_a_deleted_staged_path() {
-	local out
-	mkrepo <<-'CONF' || return
-		schema = 1
-
-		[group shell]
-		match = *.sh
-		run   = printf lane\n
-	CONF
-	printf 'staged\n' >"$repo/a.sh"
-	git -C "$repo" add a.sh
-	rm "$repo/a.sh"
-
-	out=$(in_repo pre-commit)
-	want_exit 'pre-commit/a staged file deleted after add exits 1' 1 $?
-	want_in 'pre-commit/a staged file deleted after add says why' \
-		'not what the worktree holds' "$out"
-	want_not_in 'pre-commit/a staged file deleted after add runs no lane' \
-		'lane' "$out"
-}
-
-# The refusal is per group: a dirty staged file no lane reads must not block
-# a commit whose staged files a lane does read.
-case_pre_commit_ignores_a_dirty_path_no_lane_reads() {
-	local out
-	mkrepo <<-'CONF' || return
-		schema = 1
-
-		[group shell]
-		match = *.sh
-		run   = printf lane\n
-	CONF
-	printf 'staged\n' >"$repo/a.sh"
-	printf 'staged\n' >"$repo/a.txt"
-	git -C "$repo" add a.sh a.txt
-	printf 'worktree\n' >"$repo/a.txt"
-
-	out=$(in_repo pre-commit)
-	want_exit 'pre-commit/a dirty path no lane reads exits 0' 0 $?
-	want_in 'pre-commit/a dirty path no lane reads still runs the lane' \
-		'lane' "$out"
-}
-
-case_check_sees_unstaged() {
-	local out
-	mkrepo <<-'CONF' || return
-		schema = 1
-
-		[group shell]
-		match = *.sh
-		run   = printf path:%s\n
-	CONF
-	printf 'x\n' >"$repo/a.sh"
-	git -C "$repo" add -A
-	git -C "$repo" commit -qm 'init'
-	printf 'y\n' >>"$repo/a.sh"
-
-	out=$(in_repo check)
-	want_in 'check/judges working changes, staged or not' 'path:a.sh' "$out"
-}
-
-case_check_sees_untracked() {
-	local out
-	mkrepo <<-'CONF' || return
-		schema = 1
-
-		[group shell]
-		match = *.sh
-		run   = printf path:%s\n
-	CONF
-	printf 'ignored.sh\n' >"$repo/.gitignore"
-	printf 'x\n' >"$repo/a.sh"
-	git -C "$repo" add -A
-	git -C "$repo" commit -qm 'init'
-	printf 'y\n' >"$repo/new.sh"
-	printf 'z\n' >"$repo/ignored.sh"
-
-	out=$(in_repo check)
-	want_in 'check/judges an untracked file' 'path:new.sh' "$out"
-	want_not_in 'check/an ignored file stays out' 'path:ignored.sh' "$out"
-
-	# Stage something so the lane runs: otherwise "new.sh is absent" proves
-	# nothing about the staged set, only that no lane ran at all.
-	printf 'y\n' >>"$repo/a.sh"
-	git -C "$repo" add a.sh
-
-	out=$(in_repo pre-commit)
-	want_in 'pre-commit/a staged file reaches the lane' 'path:a.sh' "$out"
-	want_not_in 'pre-commit/an untracked file is not staged' \
-		'path:new.sh' "$out"
-}
-
-case_check_never_stages() {
-	local out staged
-	mkrepo <<-'CONF' || return
-		schema = 1
-
-		[group shell]
-		match = *.sh
-		fix   = true
-		run   = true
-	CONF
-	printf 'x\n' >"$repo/a.sh"
-	git -C "$repo" add -A
-	git -C "$repo" commit -qm 'init'
-	printf 'y\n' >>"$repo/a.sh"
-
-	out=$(in_repo check --fix)
-	want_exit 'check/--fix exits 0' 0 $?
-	staged=$(git -C "$repo" diff --cached --name-only)
-	want_not_in 'check/--fix stages nothing' 'a.sh' "$staged"
-}
-
-case_check_grades_stdin() {
-	local out
-	mkrepo <<-'CONF' || return
-		schema = 1
+		schema = 2
 		types  = feat
 	CONF
-	out=$(cd "$repo" &&
-		printf 'nope\n' |
-		GITHOOKS_CONF=$repo/hooks.conf "$engine" check - 2>&1)
-	want_exit 'check/grades a message on stdin' 1 $?
-	want_in 'check/stdin rejection says the shape' 'the shape' "$out"
+	out=$(printf 'nope\n' | in_repo -)
+	want_exit 'grader/grades a message on stdin' 1 $?
+	want_in 'grader/stdin rejection says the shape' 'the shape' "$out"
+
+	printf 'feat: a\n' | in_repo - >/dev/null
+	want_exit 'grader/a good message on stdin passes' 0 $?
 }
 
-# `check` runs lanes before it grades the message. A lane failure must not
-# leak into the message: the shape is the message's rejection, not the run's.
-case_check_message_after_a_failed_lane() {
+# The path is the caller's: relative to where it stands, not to the root the
+# grader moves to for the conf.
+case_relative_path_from_a_subdir() {
 	local out
 	mkrepo <<-'CONF' || return
-		schema = 1
+		schema = 2
 		types  = feat
-
-		[group boom]
-		scope = tree
-		run   = false
-	CONF
-	out=$(cd "$repo" &&
-		printf 'feat: a valid message\n' |
-		GITHOOKS_CONF=$repo/hooks.conf "$engine" check - 2>&1)
-	want_exit 'check/a failed lane with a valid message exits 1' 1 $?
-	want_not_in 'check/a failed lane does not print the message shape' \
-		'the shape' "$out"
-}
-
-case_symlink_skipped() {
-	local out
-	mkrepo <<-'CONF' || return
-		schema = 1
-
-		[group shell]
-		match = *.sh
-		run   = printf path:%s\n
-	CONF
-	printf 'x\n' >"$repo/a.sh"
-	ln -s a.sh "$repo/link.sh"
-	git -C "$repo" add -A
-
-	out=$(in_repo pre-commit)
-	want_in 'pre-commit/a real file reaches the lane' 'path:a.sh' "$out"
-	want_not_in 'pre-commit/a symlink never reaches a lane' \
-		'path:link.sh' "$out"
-}
-
-case_runs_from_a_subdir() {
-	local out
-	mkrepo <<-'CONF' || return
-		schema = 1
-
-		[group shell]
-		match = *.sh
-		run   = printf path:%s\n
 	CONF
 	mkdir -p "$repo/deep"
-	printf 'x\n' >"$repo/deep/a.sh"
-	git -C "$repo" add -A
-
-	out=$(cd "$repo/deep" && GITHOOKS_CONF=$repo/hooks.conf "$engine" check 2>&1)
-	want_in 'check/paths stay relative to the repo root' \
-		'path:deep/a.sh' "$out"
+	printf 'nope\n' >"$repo/deep/m"
+	out=$(cd "$repo/deep" && "$grader" m 2>&1)
+	want_exit 'grader/a relative path from a subdir is graded' 1 $?
+	want_not_in 'grader/a relative path resolves' 'no such message file' "$out"
 }
 
-case_no_match_runs_always() {
-	local out
-	mkrepo <<-'CONF' || return
-		schema = 1
-
-		[group always]
-		run = printf ran\\n
-	CONF
-	printf 'x\n' >"$repo/a.sh"
-	git -C "$repo" add -A
-
-	out=$(in_repo pre-commit)
-	want_in 'pre-commit/a group with no match always runs' 'ran' "$out"
-}
-
-# The engine defines its own functions in the same shell a lane runs in. They
-# carry a `gh_` prefix so a conf cannot name one by accident: a bare engine
-# name reads as a missing tool, and nothing runs in-process.
-case_lane_never_calls_engine_functions() {
-	local out
-	mkrepo <<-'CONF' || return
-		schema = 1
-
-		[group probe]
-		scope   = staged
-		require = true
-		run     = print_shape
-	CONF
-	printf 'x\n' >"$repo/a.md"
-	git -C "$repo" add -A
-
-	out=$(in_repo pre-commit)
-	want_exit 'pre-commit/a lane cannot reach an engine function' 1 $?
-	want_not_in 'pre-commit/engine internals stay out of lanes' \
-		'the shape:' "$out"
-	want_in 'pre-commit/the engine name reads as missing' \
-		'print_shape not found' "$out"
-}
-
-case_lane_failure_names_the_fixer() {
-	local out
-	mkrepo <<-'CONF' || return
-		schema = 1
-
-		[group shell]
-		match = *.sh
-		run   = false
-		fix   = true
-	CONF
-	printf 'x\n' >"$repo/a.sh"
-	git -C "$repo" add -A
-
-	out=$(in_repo pre-commit)
-	want_exit 'pre-commit/a failed lane exits 1' 1 $?
-	want_in 'pre-commit/a failed lane names the fixer' '--fix' "$out"
-}
-
-# Regression: `die` used to run inside $(git_root), so it exited that subshell
-# and the engine carried on with an empty root and passed the commit.
 case_outside_a_repo() {
 	local dir out
 	dir=$(mktemp -d -p "$tmproot") || return
-	printf 'schema = 1\n' >"$dir/hooks.conf"
+	printf 'feat: a\n' >"$dir/m"
+	out=$(cd "$dir" && "$grader" m 2>&1)
+	want_exit 'grader/outside a repo exits 2' 2 $?
+	want_in 'grader/outside a repo says so' 'not inside a git repository' "$out"
+}
 
-	out=$(cd "$dir" && GITHOOKS_CONF=$dir/hooks.conf "$engine" pre-commit 2>&1)
-	want_exit 'engine/outside a repo exits 2' 2 $?
-	want_in 'engine/outside a repo says so' 'not inside a git repository' "$out"
-
-	out=$(cd "$dir" && "$engine" typo 2>&1)
-	want_exit 'engine/an unknown command exits 2' 2 $?
-	want_in 'engine/an unknown command shows usage' 'usage: githooks' "$out"
+case_no_conf() {
+	local out
+	mkrepo </dev/null || return
+	rm "$repo/.githooks/hooks.conf"
+	out=$(printf 'feat: a\n' | in_repo -)
+	want_exit 'grader/no conf exits 2' 2 $?
+	want_in 'grader/no conf names the path' '.githooks/hooks.conf' "$out"
 }
 
 case_cli_surface() {
 	local out
 	mkrepo <<-'CONF' || return
-		schema = 1
+		schema = 2
 	CONF
 	out=$(in_repo version)
 	want_exit 'cli/version exits 0' 0 $?
-	want_in 'cli/version names the schema' 'schema' "$out"
+	want_in 'cli/version names the schema' 'schema 2' "$out"
 
-	in_repo >/dev/null 2>&1
+	in_repo >/dev/null
 	want_exit 'cli/no arguments exits 2' 2 $?
 
-	in_repo not-a-command >/dev/null 2>&1
-	want_exit 'cli/an unknown command exits 2' 2 $?
+	in_repo a b >/dev/null
+	want_exit 'cli/two arguments exits 2' 2 $?
 
-	in_repo commit-msg >/dev/null 2>&1
-	want_exit 'cli/commit-msg with no file exits 2' 2 $?
-
-	in_repo pre-commit --nope >/dev/null 2>&1
-	want_exit 'cli/an unknown flag exits 2' 2 $?
-
-	in_repo pre-commit --all >/dev/null 2>&1
-	want_exit 'cli/pre-commit --all exits 2' 2 $?
-
-	printf 'feat(conf): a\n' >"$repo/a.msg"
-	printf 'nope\n' >"$repo/b.msg"
-	in_repo check a.msg b.msg >/dev/null 2>&1
-	want_exit 'cli/check with two files exits 2' 2 $?
+	out=$(in_repo nope.msg)
+	want_exit 'cli/a missing file exits 2' 2 $?
+	want_in 'cli/a missing file is named' 'no such message file' "$out"
 }
 
 # ------------------------------------------------------------------ config
@@ -840,21 +250,20 @@ case_cli_surface() {
 case_conf_unknown_key() {
 	local out
 	mkrepo <<-'CONF' || return
-		schema = 1
+		schema = 2
 		subjet_max = 72
 	CONF
-	out=$(in_repo check)
+	out=$(printf 'feat: a\n' | in_repo -)
 	want_exit 'conf/unknown key exits 2' 2 $?
 	want_in 'conf/unknown key names the key' 'subjet_max' "$out"
 }
 
 case_conf_bad_value() {
-	local out
 	mkrepo <<-'CONF' || return
-		schema      = 1
+		schema      = 2
 		subject_max = wide
 	CONF
-	out=$(in_repo check)
+	printf 'feat: a\n' | in_repo - >/dev/null
 	want_exit 'conf/bad value exits 2' 2 $?
 }
 
@@ -863,255 +272,238 @@ case_conf_unknown_schema() {
 	mkrepo <<-'CONF' || return
 		schema = 99
 	CONF
-	out=$(in_repo check)
+	out=$(printf 'feat: a\n' | in_repo -)
 	want_exit 'conf/unknown schema exits 2' 2 $?
-	want_in 'conf/unknown schema names the stale side' 'stale' "$out"
+	want_in 'conf/a newer schema says the grader is stale' \
+		'grader is stale' "$out"
 }
 
-case_conf_malformed_group_header() {
+# Schema 1 carried lanes. Absent means 1, so an unmigrated conf lands here
+# and must say where the lanes went.
+case_conf_schema_one() {
 	local out
 	mkrepo <<-'CONF' || return
-		[group shell
-		run = true
+		types = feat
 	CONF
-	out=$(in_repo check)
-	want_exit 'conf/malformed group header exits 2' 2 $?
+	out=$(printf 'feat: a\n' | in_repo -)
+	want_exit 'conf/schema 1 exits 2' 2 $?
+	want_in 'conf/schema 1 says where lanes went' 'lefthook.yml' "$out"
+	want_in 'conf/schema 1 says what to write' 'schema = 2' "$out"
 }
 
-# A second `match` replaced the first and the lane went quiet - the one config
-# typo nothing downstream can catch.
+case_conf_group_section() {
+	local out
+	mkrepo <<-'CONF' || return
+		schema = 2
+
+		[group shell]
+		run = shfmt -d
+	CONF
+	out=$(printf 'feat: a\n' | in_repo -)
+	want_exit 'conf/a [group] section exits 2' 2 $?
+	want_in 'conf/a [group] section says where lanes went' \
+		'lanes moved to lefthook.yml' "$out"
+}
+
+# A second `types` replaced the first and the policy narrowed - the one
+# config typo nothing downstream can catch.
 case_conf_duplicate_key() {
 	local out
 	mkrepo <<-'CONF' || return
-		schema = 1
-
-		[group two]
-		match = *.aaa
-		match = *.bbb
-		scope = staged
-		run   = true
-	CONF
-	out=$(in_repo check)
-	want_exit 'conf/a duplicate key exits 2' 2 $?
-	want_in 'conf/a duplicate key names both lines' 'first at line 4' "$out"
-	want_in 'conf/a duplicate key says what to write' \
-		'write one match line' "$out"
-}
-
-case_conf_duplicate_top_level_key() {
-	local out
-	mkrepo <<-'CONF' || return
-		schema      = 1
-		subject_max = 72
-		subject_max = 80
-	CONF
-	out=$(in_repo check)
-	want_exit 'conf/a duplicate top-level key exits 2' 2 $?
-}
-
-# `run` still stacks, and one key per group is per *group*: two groups each
-# write their own. `scope_root` accumulating is the commit-msg fixture conf,
-# which derives its scopes from two of them.
-case_conf_accumulating_keys() {
-	local out
-	mkrepo <<-'CONF' || return
-		schema = 1
-
-		[group one]
-		match = *.aaa
-		scope = tree
-		run   = printf one\n
-		run   = printf two\n
-
-		[group other]
-		match = *.bbb
-		scope = tree
-		run   = printf three\n
-	CONF
-	printf 'x\n' >"$repo/f.aaa"
-	printf 'x\n' >"$repo/f.bbb"
-	out=$(in_repo check)
-	want_exit 'conf/accumulating keys still accumulate' 0 $?
-	want_in 'conf/every run line runs' 'two' "$out"
-	want_in 'conf/each group writes its own match' 'three' "$out"
-}
-
-# --------------------------------------------------------------- check --all
-
-# `--all` swaps the change set for the whole tree, with the same filter `check`
-# already applies to what it does judge.
-case_check_all_files() {
-	local out
-	mkrepo <<-'CONF' || return
-		schema = 1
-
-		[group shell]
-		match = *.sh
-		run   = printf path:%s\n
-
-		[group removed]
-		match = gone.sh
-		scope = tree
-		run   = printf deletion-trigger\n
-	CONF
-	printf 'ign.sh\n' >"$repo/.gitignore"
-	printf 'x\n' >"$repo/a.sh"
-	printf 'x\n' >"$repo/gone.sh"
-	ln -s a.sh "$repo/link.sh"
-	git -C "$repo" add -A
-	git -C "$repo" commit -qm 'init'
-	printf 'z\n' >"$repo/new.sh"
-	printf 'z\n' >"$repo/ign.sh"
-	rm "$repo/gone.sh"
-
-	out=$(in_repo check --all)
-	want_exit 'check --all exits 0' 0 $?
-	want_in 'check --all reaches an unchanged tracked file' 'path:a.sh' "$out"
-	want_in 'check --all reaches an untracked file' 'path:new.sh' "$out"
-	want_not_in 'check --all drops an ignored file' 'path:ign.sh' "$out"
-	want_not_in 'check --all drops a symlink' 'path:link.sh' "$out"
-	want_not_in 'check --all drops a deleted path' 'path:gone.sh' "$out"
-	want_in 'check --all keeps the deletion trigger for a tree lane' \
-		'deletion-trigger' "$out"
-
-	# Without the flag the change set is still what it was: new.sh only.
-	out=$(in_repo check)
-	want_in 'check alone still judges the change set' 'path:new.sh' "$out"
-	want_not_in 'check alone ignores an unchanged file' 'path:a.sh' "$out"
-}
-
-# The other half of the fixture above: a glob that matches nothing in the tree
-# leaves a `staged` lane with nothing to hand it, exactly as an empty change
-# set does. The lane that does match proves the run was not vacuous.
-case_check_all_skips_unmatched_lane() {
-	local out
-	mkrepo <<-'CONF' || return
-		schema = 1
-
-		[group rust]
-		match = *.rs
-		run   = printf ran-rust\n
-
-		[group docs]
-		match = *.md
-		run   = printf ran-docs\n
-	CONF
-	printf 'x\n' >"$repo/a.md"
-
-	out=$(in_repo check --all)
-	want_exit 'check --all exits 0' 0 $?
-	want_in 'check --all runs a lane the tree feeds' 'ran-docs' "$out"
-	want_not_in 'check --all skips a lane no file feeds' 'ran-rust' "$out"
-}
-
-# "All files" cannot lean on HEAD: a fresh clone or `git init` has none.
-case_check_all_without_head() {
-	local out
-	mkrepo <<-'CONF' || return
-		schema = 1
-
-		[group shell]
-		match = *.sh
-		run   = printf path:%s\n
-	CONF
-	git -C "$repo" rev-parse --verify --quiet HEAD >/dev/null 2>&1
-	want_exit 'the fixture has no HEAD yet' 1 $?
-
-	printf 'x\n' >"$repo/a.sh"
-	out=$(in_repo check --all)
-	want_exit 'check --all works with no commits yet' 0 $?
-	want_in 'check --all reaches the only file, uncommitted' 'path:a.sh' "$out"
-}
-
-# `--fix --all` formats the whole tree but stages nothing, same as `check
-# --fix`: these files were never staged.
-case_check_all_fix_never_stages() {
-	local out staged
-	mkrepo <<-'CONF' || return
-		schema = 1
-
-		[group shell]
-		match = *.sh
-		run   = true
-		fix   = printf fixed:%s\n
-	CONF
-	printf 'x\n' >"$repo/a.sh"
-	git -C "$repo" add -A
-	git -C "$repo" commit -qm 'init'
-	printf 'y\n' >"$repo/new.sh"
-
-	out=$(in_repo check --all --fix)
-	want_exit 'check --all --fix exits 0' 0 $?
-	want_in 'check --all --fix runs the fixer over an untracked file' \
-		'fixed:new.sh' "$out"
-	staged=$(git -C "$repo" diff --cached --name-only)
-	want_not_in 'check --all --fix stages nothing' 'new.sh' "$staged"
-}
-
-# A message is graded after the lanes, `--all` or not.
-case_check_all_grades_message() {
-	local out
-	mkrepo <<-'CONF' || return
-		schema = 1
+		schema = 2
 		types  = feat
+		types  = fix
 	CONF
-	out=$(cd "$repo" &&
-		printf 'nope\n' |
-		GITHOOKS_CONF=$repo/hooks.conf "$engine" check --all - 2>&1)
-	want_exit 'check --all grades a message on stdin' 1 $?
-	want_in 'check --all stdin rejection says the shape' 'the shape' "$out"
+	out=$(printf 'feat: a\n' | in_repo -)
+	want_exit 'conf/a duplicate key exits 2' 2 $?
+	want_in 'conf/a duplicate key names both lines' 'first at line 2' "$out"
+	want_in 'conf/a duplicate key says what to write' \
+		'write one types line' "$out"
+}
+
+# ---------------------------------------------------------------- lefthook
+
+# This tree - worktree bytes, not HEAD - committed into a throwaway repo and
+# tagged, so consumers fetch it the way a real one fetches a release.
+remote=''
+
+make_remote() {
+	remote=$(mktemp -d -p "$tmproot") || return 1
+	cp -r "$src/shared" "$src/.lefthook" "$remote/" || return 1
+	git -C "$remote" init -q
+	git -C "$remote" add -A
+	git -C "$remote" -c user.email=t@example.com -c user.name=t \
+		commit -qm 'feat: remote' || return 1
+	git -C "$remote" tag vtest
+}
+
+# A consumer repo in $repo: conf, lefthook.yml pinned to the remote, hooks
+# installed. Extra remote configs as arguments; base and shell always.
+mkconsumer() {
+	local config
+	mkrepo <<-'CONF' || return 1
+		schema      = 2
+		types       = feat fix
+		scope_fixed = app
+	CONF
+	{
+		printf 'min_version: "2.1"\nglob_matcher: doublestar\n'
+		printf 'remotes:\n  - git_url: %s\n    ref: vtest\n' "$remote"
+		printf '    configs:\n'
+		for config in base shell "$@"; do
+			printf '      - shared/%s.yml\n' "$config"
+		done
+	} >"$repo/lefthook.yml"
+	git -C "$repo" add -A
+	LEFTHOOK=0 git -C "$repo" commit -qm 'feat: init' || return 1
+	(cd "$repo" && lefthook install >/dev/null 2>&1)
+}
+
+commit() {
+	(cd "$repo" && git commit -qm "$1" 2>&1)
+}
+
+lh() {
+	(cd "$repo" && lefthook run "$@" 2>&1)
+}
+
+unformatted='#!/bin/bash\nif true;then echo hi;fi\n'
+formatted='#!/bin/bash
+if true; then echo hi; fi'
+
+# base.yml delivers the grader through a remote and hands it the message.
+case_lh_message() {
+	local out
+	mkconsumer || return
+	printf 'x\n' >"$repo/a.txt"
+	git -C "$repo" add a.txt
+
+	out=$(commit 'nope')
+	want_exit 'lefthook/a bad message is refused' 1 $?
+	want_in 'lefthook/the refusal is the grader' 'githooks-msg: subject' "$out"
+
+	commit 'feat(app): add a' >/dev/null
+	want_exit 'lefthook/a good message commits' 0 $?
+}
+
+# shell.yml's policy: a formatter writes on commit and re-stages.
+case_lh_formats_and_restages() {
+	mkconsumer || return
+	printf %b "$unformatted" >"$repo/a.sh"
+	git -C "$repo" add a.sh
+	commit 'feat: add a' >/dev/null
+	want_exit 'lefthook/an unformatted file still commits' 0 $?
+	want_in 'lefthook/the commit ships it formatted' "$formatted" \
+		"$(git -C "$repo" show HEAD:a.sh)"
+}
+
+# shell.yml wires the linter into pre-commit as a check.
+case_lh_shellcheck_refuses() {
+	mkconsumer || return
+	printf 'x=1\n' >"$repo/a.sh"
+	git -C "$repo" add a.sh
+	commit 'feat: add a' >/dev/null
+	want_exit 'lefthook/a shellcheck finding refuses the commit' 1 $?
+}
+
+# The target would fail shellcheck, and is no .sh itself: only a lane handed
+# the link could refuse this commit.
+case_lh_symlink_skipped() {
+	mkconsumer || return
+	printf 'x=1\n' >"$repo/target"
+	ln -s target "$repo/link.sh"
+	git -C "$repo" add target link.sh
+	commit 'feat: add a link' >/dev/null
+	want_exit 'lefthook/a symlink never reaches a lane' 0 $?
+}
+
+# `lefthook run` ignores an unknown key; base.yml's validate job does not.
+case_lh_validate_refuses_a_typo() {
+	mkconsumer || return
+	printf 'pre-commit:\n  paralel: true\n' >>"$repo/lefthook.yml"
+	git -C "$repo" add lefthook.yml
+	commit 'feat: tune hooks' >/dev/null
+	want_exit 'lefthook/a lefthook.yml typo refuses the commit' 1 $?
+}
+
+# check: our file set - untracked included - and no job that writes.
+case_lh_check_is_read_only() {
+	mkconsumer || return
+	printf %b "$unformatted" >"$repo/new.sh"
+	lh check >/dev/null
+	want_exit 'lefthook/check sees an untracked file' 1 $?
+	want_not_in 'lefthook/check never writes' 'if true; then' \
+		"$(<"$repo/new.sh")"
+	want_exit 'lefthook/check never stages' 0 \
+		"$(git -C "$repo" diff --cached --name-only | wc -l)"
+}
+
+# fix: writes, and no stage_fixed.
+case_lh_fix_never_stages() {
+	mkconsumer || return
+	printf %b "$unformatted" >"$repo/new.sh"
+	lh fix >/dev/null
+	want_exit 'lefthook/fix exits 0' 0 $?
+	want_in 'lefthook/fix writes' "$formatted" "$(<"$repo/new.sh")"
+	want_exit 'lefthook/fix never stages' 0 \
+		"$(git -C "$repo" diff --cached --name-only | wc -l)"
+}
+
+# No HEAD: `git diff HEAD` fails, and check must fall back, not pass.
+case_lh_check_without_head() {
+	mkconsumer || return
+	rm -rf "$repo/.git"
+	git -C "$repo" init -q
+	(cd "$repo" && lefthook install >/dev/null 2>&1)
+	printf %b "$unformatted" >"$repo/new.sh"
+	lh check >/dev/null
+	want_exit 'lefthook/check without HEAD still sees files' 1 $?
+}
+
+case_lh_every_shared_config_validates() {
+	local out
+	mkconsumer prettier || return
+	out=$(cd "$repo" && lefthook validate 2>&1)
+	want_exit 'lefthook/every shared config validates' 0 $?
 }
 
 # -------------------------------------------------------------------- main
 
+# Mandatory, not skipped: a harness that goes quiet without its tools proves
+# nothing, and says so least when it matters.
+for tool in lefthook shfmt shellcheck; do
+	command -v "$tool" >/dev/null 2>&1 || no "harness/$tool not found"
+done
+
 make_fixture_repo || exit 1
 run_commit_msg
 run_commit_msg_output
+make_remote || exit 1
 
 # Every case_* function must appear here. A defined-but-unregistered case does
 # not run, and a test that does not run is the failure this harness exists to
 # catch - so the guard below fails the run rather than staying quiet.
 cases=(
-	case_empty_staged
-	case_check_clean_tree
-	case_tree_match_filters
-	case_tree_match_deletion
-	case_match_and_paths
-	case_aggregate
-	case_missing_tool
-	case_deleted_path
-	case_scope_tree
-	case_fix_and_restage
-	case_fix_failure_never_stages
-	case_fix_refuses_partial
-	case_fix_refuses_partial_at_tree_scope
-	case_pre_commit_refuses_a_dirty_staged_path
-	case_pre_commit_refuses_a_deleted_staged_path
-	case_pre_commit_ignores_a_dirty_path_no_lane_reads
-	case_check_sees_unstaged
-	case_check_sees_untracked
-	case_check_never_stages
-	case_check_grades_stdin
-	case_check_message_after_a_failed_lane
-	case_symlink_skipped
-	case_runs_from_a_subdir
-	case_no_match_runs_always
-	case_lane_never_calls_engine_functions
-	case_lane_failure_names_the_fixer
+	case_grades_stdin
+	case_relative_path_from_a_subdir
 	case_outside_a_repo
+	case_no_conf
 	case_cli_surface
 	case_conf_unknown_key
 	case_conf_bad_value
 	case_conf_unknown_schema
-	case_conf_malformed_group_header
+	case_conf_schema_one
+	case_conf_group_section
 	case_conf_duplicate_key
-	case_conf_duplicate_top_level_key
-	case_conf_accumulating_keys
-	case_check_all_files
-	case_check_all_skips_unmatched_lane
-	case_check_all_without_head
-	case_check_all_fix_never_stages
-	case_check_all_grades_message
+	case_lh_message
+	case_lh_formats_and_restages
+	case_lh_shellcheck_refuses
+	case_lh_symlink_skipped
+	case_lh_validate_refuses_a_typo
+	case_lh_check_is_read_only
+	case_lh_fix_never_stages
+	case_lh_check_without_head
+	case_lh_every_shared_config_validates
 )
 
 for case_name in "${cases[@]}"; do

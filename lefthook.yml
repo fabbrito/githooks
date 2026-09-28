@@ -1,0 +1,9 @@
+# githooks' own hooks: the shared configs it publishes, read from this tree
+# instead of a remote, so every commit proves them.
+min_version: "2.1"
+glob_matcher: doublestar
+
+extends:
+  - shared/base.yml
+  - shared/shell.yml
+  - shared/prettier.yml

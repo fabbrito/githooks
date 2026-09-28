@@ -1,16 +1,18 @@
-# hooks.conf - the whole policy for one repo. Copy this to .githooks/, delete
-# what you do not need, and keep it committed.
+# hooks.conf - one repo's commit-message policy. Copy this to .githooks/,
+# delete what you do not need, and keep it committed. Lanes live in
+# lefthook.yml, not here.
 #
 # Format: INI-lite. `#` comments, blank lines ignored, `key = value`. Values
-# split on whitespace; `run` and `fix` take the rest of the line verbatim.
-# Every key below has the default shown, so a three-line config is valid.
+# split on whitespace. Every key below has the default shown, so a two-line
+# config is valid.
 #
-# Unknown key, bad value, unknown schema: exit 2, along with anything else
-# that stopped the engine judging your commit. Never exit 1 - a broken config
-# is not a rejected commit.
+# Unknown key, bad value, unknown schema, a [group] section: exit 2, along
+# with anything else that stopped the grader judging your message. Never
+# exit 1 - a broken config is not a rejected commit.
 
-# The config format this file is written against. Absent means 1.
-schema = 1
+# The config format this file is written against. Absent means 1, which
+# carried lanes and is refused: write 2.
+schema = 2
 
 # ------------------------------------------------------------ commit policy
 
@@ -42,65 +44,3 @@ scope_fixed = repo docs tools setup hooks make
 # trailer_reference: one non-space token
 trailer_person    = Co-Authored-By Signed-off-by Reviewed-by
 trailer_reference = Refs Closes Fixes
-
-# ------------------------------------------------------------------- lanes
-#
-# A group runs when any changed path matches one of its `match` globs. Groups
-# run in order, every matching group runs even after one fails, and the status
-# aggregates - one pass shows you everything.
-#
-#   match   = shell case globs, so `*` crosses `/`. Absent means always run.
-#             A deleted path triggers a `tree` lane but never reaches a
-#             `staged` one: there is no file left to hand it.
-#   scope   = staged | tree. `staged` appends the matched paths to each
-#             command; `tree` runs the command as written.
-#   run     = a command, once per line, exec'd as written and split on
-#             whitespace: no quoting, no redirection, no pipeline, no globs,
-#             and it inherits the caller's stdin, stdout and stderr. Needing
-#             any of those means a script.
-#   fix     = replaces `run` under --fix, and re-stages the matched paths
-#             (pre-commit only - `check --fix` formats but never stages).
-#   require = true makes a missing command fail. Default false: it warns and
-#             skips, because a machine without shfmt is usually a machine that
-#             has not finished setting up.
-#
-# `run`, `fix` and `scope_root` take a line each and accumulate. Every other
-# key is written once - a second line is exit 2, naming the first.
-#
-# A formatter's own config - .prettierrc.json, .editorconfig - redefines
-# "formatted" for every file it reaches, not just the changed ones. Give it a
-# `tree` lane, or the commit that widens it passes and the next one pays.
-
-# [group shell]
-# match   = *.sh .githooks/githooks .githooks/commit-msg .githooks/pre-commit
-# scope   = staged
-# require = false
-# run     = shfmt -i 0 -ci -d
-# fix     = shfmt -i 0 -ci -w
-# run     = shellcheck -x
-
-# Pinned so an upstream release cannot turn your tree red. Copy the current
-# version, not this one. npx, not bunx - bun leaves stdio non-blocking and
-# downstream tools then misbehave.
-# [group docs]
-# match = *.md *.json *.yml *.yaml
-# scope = staged
-# run   = npx --yes prettier@3.9.8 --check
-# fix   = npx --yes prettier@3.9.8 --write
-
-# The config lane the paragraph above asks for. `.` because the command is
-# exec'd, not globbed - prettier reads .prettierignore itself.
-# [group docs-config]
-# match   = .prettierrc.json .prettierignore
-# scope   = tree
-# require = true
-# run     = npx --yes prettier@3.9.8 --check .
-# fix     = npx --yes prettier@3.9.8 --write .
-
-# A lane the engine cannot express - a vault guard, a secret scan - is a
-# script you call from here, or a native pre-commit that runs the engine and
-# then its own guard. The config never grows a conditional.
-# [group secrets]
-# scope   = tree
-# require = true
-# run     = tools/no-secrets.sh

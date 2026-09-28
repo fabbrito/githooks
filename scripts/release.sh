@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 #
-# Cut a release on this machine: stamp, vendor, gate, commit, tag. Nothing
-# leaves the machine - `make publish` does that.
+# Cut a release on this machine: stamp, gate, commit, tag. Nothing leaves
+# the machine - `make publish` does that.
 #   make release VERSION=v1.0.0 [DRY_RUN=1]
 #
-# The version is stamped into bin/githooks and the vendored copy, so a
-# consumer that runs `githooks version` gets the tag it fetched, with no lock
-# file to keep in sync. Between releases the tree carries the last one: the
-# tag is the truth, the constant is a convenience.
+# The version is stamped into the grader, so a consumer that runs
+# `githooks-msg.sh version` gets the tag its remote ref pins. Between
+# releases the tree carries the last one: the tag is the truth, the constant
+# is a convenience.
 #
 # A dry run writes nothing and reports every refusal instead of the first.
 #
@@ -63,26 +63,25 @@ if git remote get-url origin >/dev/null 2>&1; then
 fi
 
 if $dry; then
-	printf 'release: would stamp %s, vendor, gate, commit, tag\n' "$tag"
+	printf 'release: would stamp %s, gate, commit, tag\n' "$tag"
 	((refusals > 0)) && exit 1
 	exit 0
 fi
 
-# Stamp both copies before the gate: the gate runs the vendored engine, so a
-# release is proven with exactly the bytes that ship.
-sed -i "s/^VERSION=.*/VERSION='$tag'/" bin/githooks ||
-	die 'cannot stamp bin/githooks'
-cp bin/githooks .githooks/githooks || die 'cannot vendor the engine'
-chmod +x .githooks/githooks
+# Stamp before the gate, so a release is proven with exactly the bytes that
+# ship.
+grader=.lefthook/commit-msg/githooks-msg.sh
+sed -i "s/^VERSION=.*/VERSION='$tag'/" "$grader" ||
+	die "cannot stamp $grader"
 
-grep -q "^VERSION='$tag'\$" bin/githooks || die 'stamp did not take'
+grep -q "^VERSION='$tag'\$" "$grader" || die 'stamp did not take'
 
 if ! make test check; then
-	git checkout -- bin/githooks .githooks/githooks
+	git checkout -- "$grader"
 	die 'gate failed - nothing committed'
 fi
 
-git add bin/githooks .githooks/githooks || die 'cannot stage the stamp'
+git add "$grader" || die 'cannot stage the stamp'
 git commit -qm "$subject" || die 'commit failed'
 git tag -a "$tag" -m "$tag" || die 'tag failed'
 

@@ -56,7 +56,7 @@ slug=$(git remote get-url origin 2>/dev/null)
 if [[ -n $slug ]]; then
 	slug=${slug%.git}
 	slug=${slug#*github.com[:/]}
-	printf '\n**The engine**: https://github.com/%s/blob/%s/bin/githooks\n' \
+	printf '\n**The configs**: https://github.com/%s/tree/%s/shared\n' \
 		"$slug" "$tag"
 	if [[ -n $prev ]]; then
 		printf '**Full changelog**: https://github.com/%s/compare/%s...%s\n' \
