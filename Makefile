@@ -1,7 +1,7 @@
-# githooks - the engine lives in bin/, the vendored copy in .githooks/.
-# `make check` runs the copy: this repo is its own first consumer.
+# githooks - shared lefthook configs and the commit-message grader they call.
+# `make check` runs them over this tree: this repo is its own first consumer.
 
-.PHONY: help hooks vendor bump test check fmt release publish
+.PHONY: help hooks test check fmt release publish
 
 define HELP_AWK
 BEGIN {
@@ -17,36 +17,27 @@ export HELP_AWK
 help: ## show this help
 	@awk "$$HELP_AWK" $(lastword $(MAKEFILE_LIST))
 
-# Once per clone: hooks do not travel with the tree.
-hooks: ## enable .githooks for this clone
-	git config core.hooksPath .githooks
-	@chmod +x .githooks/githooks .githooks/commit-msg .githooks/pre-commit
-	@echo 'hooks enabled - skip one commit with --no-verify'
-
-# Dogfood. The copy is what the hooks run, so it must not drift from bin/.
-vendor: ## refresh .githooks/githooks from bin/githooks
-	cp bin/githooks .githooks/githooks
-	@chmod +x .githooks/githooks
-
-# The consumer's own recipe, here so the script and the target can be copied
-# whole into another repo: bump fetches the latest release into .githooks/.
-bump: ## download the latest engine release into .githooks/githooks [DRY_RUN=1]
-	@scripts/update.sh $(if $(DRY_RUN),--dry-run)
+# Once per clone: hooks do not travel with the tree. core.hooksPath is
+# unset first - a leftover from the vendored engine would hide lefthook's.
+hooks: ## install lefthook's hooks for this clone
+	@git config --unset core.hooksPath || true
+	lefthook install
+	@echo 'hooks enabled - skip one commit with LEFTHOOK=0'
 
 ##@ Quality
-test: ## the fixture harness - commit-msg + dispatcher
+test: ## the fixture harness - grader + shared configs through lefthook
 	tests/run.sh
 
-# No fmt.sh or lint.sh here: the lanes live in hooks.conf and the vendored
-# engine dispatches them. That is the whole product.
-check: vendor ## the whole-tree gate - every lane, read only
-	.githooks/githooks check --all
+# The lanes live in lefthook.yml, which extends shared/: this repo is its
+# own first consumer.
+check: ## the whole-tree gate - every lane, read only
+	lefthook run check --all-files
 
-fmt: vendor ## the same lanes, writing - shfmt -w, prettier --write
-	.githooks/githooks check --all --fix
+fmt: ## the same lanes, writing - never stages
+	lefthook run fix --all-files
 
 ##@ Release
-# release.sh stamps VERSION into bin/githooks, vendors, commits, tags.
+# release.sh stamps VERSION into the grader, gates, commits, tags.
 release: ## tag a release here, gated - VERSION=vX.Y.Z [DRY_RUN=1]
 	scripts/release.sh $(if $(DRY_RUN),--dry-run) $(VERSION)
 
