@@ -12,7 +12,7 @@
 # Exit: 0 ok, 1 rejected, 2 usage, config or a broken environment.
 set -uo pipefail
 
-VERSION='v0.3.1'
+VERSION='v0.4.0'
 SCHEMA=2
 
 prog=githooks-msg
